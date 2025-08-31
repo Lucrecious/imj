@@ -224,6 +224,7 @@ bool imj_from_file(const char *filepath, imj_t *imj, imj_io_mode_t mode) {
     imj->src.length = size;
     imj->current = (char*)imj->src.data;
     imj->log_errors = true;
+    imj->io_mode = mode;
 
     __imj_skip_whitespace(imj);
     if (*imj->current != '\0') {

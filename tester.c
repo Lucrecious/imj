@@ -39,8 +39,8 @@ enum item_type_t {
     ITEM_COUNT,
 };
 
-typedef struct item_t item_t;
-struct item_t {
+typedef struct weapon_t weapon_t;
+struct weapon_t {
     item_type_t type;
     bool ranged;
     float damage;
@@ -49,7 +49,7 @@ struct item_t {
 typedef struct player_t player_t;
 struct player_t {
     float health;
-    item_t items[PLAYER_MAX_ITEM_COUNT];
+    weapon_t weapons[PLAYER_MAX_ITEM_COUNT];
 };
 
 
@@ -100,8 +100,8 @@ void game_io(game_t *game, imj_t *imj) {
             imj_begin_arr(imj);
             
             for (size_t i = 0; i < PLAYER_MAX_ITEM_COUNT; ++i) {
-                item_t *item = &game->player.items[i];
-                item_t ditem = dgame.player.items[i];
+                weapon_t *item = &game->player.weapons[i];
+                weapon_t ditem = dgame.player.weapons[i];
 
                 imj_begin_obj(imj);
 
@@ -166,8 +166,8 @@ bool compare_games(game_t *game, game_t *dgame) {
     }
 
     for (size_t i = 0; i < PLAYER_MAX_ITEM_COUNT; ++i) {
-        item_t item = game->player.items[i];
-        item_t ditem = dgame->player.items[i];
+        weapon_t item = game->player.weapons[i];
+        weapon_t ditem = dgame->player.weapons[i];
         if (item.type != ditem.type) {
             passed = false;
             nob_log(NOB_INFO, "expected game.player.item[%zu].health='%d' but got '%d' instead", i, ditem.type, item.type);
@@ -415,18 +415,18 @@ int main() {
         .is_debug = false,
         .player = {
             .health = 79,
-            .items = {
-                (item_t){
+            .weapons = {
+                (weapon_t){
                     .type = ITEM_BOW,
                     .damage = 10,
                     .ranged = true,
                 },
-                (item_t){
+                (weapon_t){
                     .type = ITEM_SWORD,
                     .damage = 34.5,
                     .ranged = false,
                 },
-                (item_t){
+                (weapon_t){
                     .type = ITEM_FISHING_LINE,
                     .damage = -2e5,
                     .ranged = true,

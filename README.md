@@ -74,7 +74,28 @@ void imj_valcstr(imj_t *imj, const char **value, const char *default_, imj_alloc
 void imj_valsv(imj_t *imj, imj_sv_t *value, const char *default_);
 ```
 
-## Why
+## Usage
+ImJSON is a header-only library, so all you need to do is copy/paste the `imj.h` file into your source code and define `IMJ_IMPLEMENTATION` before including `imj.h`
+in one of your source files to paste the implementation. You only do this in _one_ of the source file. Then include `imj.h` regularly everywhere else.
+```c
+#define IMJ_IMPLEMENTATION
+#include "imj.h"
+```
+
+## Building the Example and Tests
+I'm using [Tsoding](https://x.com/tsoding)'s [nobuild](https://github.com/tsoding/nob.h) to build the example and tester.
+
+First compile the build system
+```
+gcc nob.c -o nob
+```
+
+And then simply run `nob`
+```
+./nob
+```
+
+## Why yet another JSON parser 
 The API is an extension of an idea I saw in a [tweet](https://x.com/TylerGlaiel/status/1812974709052744158) by [Tyler Glaiel](https://x.com/TylerGlaiel)
 showing off his pattern for a save/load system.
 

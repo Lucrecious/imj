@@ -1,5 +1,6 @@
 .DS_Store
 *.dSYM/
 example
+tester
 nob
 nob.old

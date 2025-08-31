@@ -1,0 +1,17 @@
+{
+    "f": 0.1,
+    "d": 2.0e1,
+    "s": 3,
+    "i": -5,
+    "false": false,
+    "true": true,
+    "text": "text",
+    "null": null,
+    "obj": {
+        "text": "text",
+        "arr": [
+            4, { "key": "value" }, "text", null, false, true, [1, 2, 3]
+        ]
+    },
+    "arr": [4, 5, 6]
+}

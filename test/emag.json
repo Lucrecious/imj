@@ -1,0 +1,27 @@
+{
+    "player": {
+        "items": [
+            {
+                "type": 0,
+                "damage": 10,
+                "ranged": true
+            },
+            {
+                "type": 1,
+                "damage": 0.0345e3,
+                "ranged": false
+            },
+            {
+                "type": 2,
+                "damage": -2e5,
+                "ranged": true
+            }
+        ]
+    },
+    "is_debug": false,
+    "enemy_count": 169,
+    "delta_sec": 1.6666e-1,
+    "spawn_probability": 0.3,
+    "level": 42,
+    "name": "imj"
+}

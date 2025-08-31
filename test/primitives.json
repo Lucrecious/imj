@@ -1,0 +1,8 @@
+{
+    "name": "imj",
+    "level": 42,
+    "spawn_probability": 0.3,
+    "delta_sec": 1.6666e-1,
+    "enemy_count": 169,
+    "is_debug": false
+}

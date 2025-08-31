@@ -1,0 +1,21 @@
+{
+    "player": {
+        "items": [
+            {
+                "type": 0,
+                "damage": 10,
+                "ranged": true
+            },
+            {
+                "type": 1,
+                "damage": 0.0345e3,
+                "ranged": false
+            },
+            {
+                "type": 2,
+                "damage": -2e5,
+                "ranged": true
+            }
+        ]
+    }
+}

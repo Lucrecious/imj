@@ -75,8 +75,8 @@ void imj_valsv(imj_t *imj, imj_sv_t *value, const char *default_);
 ```
 
 ## Usage
-ImJSON is a header-only library, so all you need to do is copy/paste the `imj.h` file into your source code and define `IMJ_IMPLEMENTATION` before including `imj.h`
-in one of your source files to paste the implementation. You only do this in _one_ of the source file. Then include `imj.h` regularly everywhere else.
+ImJSON is a header-only library, so all you need to do is copy/paste the `imj.h` file into your source directory and define `IMJ_IMPLEMENTATION` before including `imj.h`
+in one of your source files to paste the implementation. You only do this in _one_ of the source files, then include `imj.h` regularly everywhere else.
 ```c
 #define IMJ_IMPLEMENTATION
 #include "imj.h"

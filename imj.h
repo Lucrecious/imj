@@ -121,6 +121,7 @@ bool imj_rawsv_to_cstrn(imj_sv_t sv, char *buffer, size_t n);
 
 bool imj_file(const char *filepath, imj_t *imj, imj_io_mode_t mode);
 bool imjw_flush(imj_t *imj);
+
 void imjr_cstrn(const char *cstr, size_t n, imj_t *imj);
 void imjw_init(imj_t *imj);
 
@@ -134,6 +135,7 @@ bool imj_begin_arr_ex(imj_t *imj, size_t *count);
 bool imj_begin_arr(imj_t *imj);
 void imj_end_arr(imj_t *imj);
 
+// read/write
 bool imj_valnull(imj_t *imj);
 bool imj_valb(imj_t *imj, bool *value, bool default_);
 bool imj_vali(imj_t *imj, int *value, int default_);
@@ -143,6 +145,17 @@ bool imj_vald(imj_t *imj, double *value, double default_);
 bool imj_valcstr(imj_t *imj, const char **value, const char *default_, imj_alloc alloc, void *allocator);
 bool imj_valrawsv(imj_t *imj, imj_sv_t *value, const char *default_);
 
+// convenience
+bool imj_key_valnull(imj_t *imj, const char *key);
+bool imj_key_valb(imj_t *imj, const char *key, bool *value, bool default_);
+bool imj_key_vali(imj_t *imj, const char *key, int *value, int default_);
+bool imj_key_vals(imj_t *imj, const char *key, size_t *value, size_t default_);
+bool imj_key_valf(imj_t *imj, const char *key, float *value, float default_);
+bool imj_key_vald(imj_t *imj, const char *key, double *value, double default_);
+bool imj_key_valcstr(imj_t *imj, const char *key, const char **value, const char *default_, imj_alloc alloc, void *allocator);
+bool imj_key_valrawsv(imj_t *imj, const char *key, imj_sv_t *value, const char *default_);
+
+// write only - convenience functions
 void imjw_valb(imj_t *imj, bool value);
 void imjw_vali(imj_t *imj, int value);
 void imjw_vals(imj_t *imj, size_t value);
@@ -1943,6 +1956,54 @@ bool imj_valcstr(imj_t *imj, const char **value, const char *default_, imj_alloc
     }
     
     return success;
+}
+
+bool imj_key_valnull(imj_t *imj, const char *key) {
+    bool found = imj_key(imj, key);
+    found &= imj_valnull(imj);
+    return found;
+}
+
+bool imj_key_valb(imj_t *imj, const char *key, bool *value, bool default_) {
+    bool found = imj_key(imj, key);
+    found &= imj_valb(imj, value, default_);
+    return found;
+}
+
+bool imj_key_vali(imj_t *imj, const char *key, int *value, int default_) {
+    bool found = imj_key(imj, key);
+    found &= imj_vali(imj, value, default_);
+    return found;
+}
+
+bool imj_key_vals(imj_t *imj, const char *key, size_t *value, size_t default_) {
+    bool found = imj_key(imj, key);
+    found &= imj_vals(imj, value, default_);
+    return found;
+}
+
+bool imj_key_valf(imj_t *imj, const char *key, float *value, float default_) {
+    bool found = imj_key(imj, key);
+    found &= imj_valf(imj, value, default_);
+    return found;
+}
+
+bool imj_key_vald(imj_t *imj, const char *key, double *value, double default_) {
+    bool found = imj_key(imj, key);
+    found &= imj_vald(imj, value, default_);
+    return found;
+}
+
+bool imj_key_valcstr(imj_t *imj, const char *key, const char **value, const char *default_, imj_alloc alloc, void *allocator) {
+    bool found = imj_key(imj, key);
+    found &= imj_valcstr(imj, value, default_, alloc, allocator);
+    return found;
+}
+
+bool imj_key_valrawsv(imj_t *imj, const char *key, imj_sv_t *value, const char *default_) {
+    bool found = imj_key(imj, key);
+    found &= imj_valrawsv(imj, value, default_);
+    return found;
 }
 
 void imjw_valb(imj_t *imj, bool value) {

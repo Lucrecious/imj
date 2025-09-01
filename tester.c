@@ -407,7 +407,7 @@ int main() {
 
         const char *src = "[1, 2, 3, 4]";
         imj_t imj = {0};
-        imjr_cstrn(src, strlen(src), IMJ_READ, &imj);
+        imjr_cstrn(src, strlen(src), &imj);
 
         size_t count;
         imj_begin_arr_ex(&imj, &count);

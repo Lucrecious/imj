@@ -121,7 +121,8 @@ bool imj_rawsv_to_cstrn(imj_sv_t sv, char *buffer, size_t n);
 
 bool imj_file(const char *filepath, imj_t *imj, imj_io_mode_t mode);
 bool imjw_flush(imj_t *imj);
-void imjr_cstrn(const char *cstr, size_t n, imj_io_mode_t mode, imj_t *imj);
+void imjr_cstrn(const char *cstr, size_t n, imj_t *imj);
+void imjw_init(const char *cstr, size_t n, imj_t *imj);
 
 void imj_free(imj_t *lson);
 
@@ -283,20 +284,14 @@ bool imj_file(const char *filepath, imj_t *imj, imj_io_mode_t mode) {
     return true;
 }
 
-void imjr_cstrn(const char *cstr, size_t n, imj_io_mode_t mode, imj_t *imj) {
+void imjr_cstrn(const char *cstr, size_t n, imj_t *imj) {
     *imj = (imj_t){0};
+    __imjr_init("", cstr, n, imj);
+}
 
-    switch (mode) {
-    case IMJ_READ: {
-        __imjr_init("", cstr, n, imj);
-        break;
-    }
-
-    case IMJ_WRITE: {
-        __imjw_init("", imj);
-        break;
-    }
-    }
+void imjw_init(const char *cstr, size_t n, imj_t *imj) {
+    *imj = (imj_t){0};
+    __imjw_init("", imj);
 }
 
 bool imjw_flush(imj_t *imj) {
@@ -666,7 +661,7 @@ static void __imjw_update_aggregate_count_if_necessary(imj_t *imj) {
     }
 }
 
-bool __imjr_begin_arr(imj_t *imj) {
+static bool __imjr_begin_arr(imj_t *imj) {
     if (imj->had_error) return false;
 
     __imj_assert(!imj->done, "already finished processing");
@@ -757,7 +752,7 @@ static void __imjw_sb_add_indent(imj_t *imj) {
     }
 }
 
-void __imjw_add_comma_and_ws_if_necessary(imj_t *imj) {
+static void __imjw_add_comma_and_ws_if_necessary(imj_t *imj) {
     if (imj->lvl_or_null) {
         switch (imj->lvl_or_null->type) {
         case IMJ_KEY_VALUE: break;
@@ -831,7 +826,7 @@ bool imj_begin_arr(imj_t *imj) {
     return success;
 }
 
-bool __imjr_begin_arr_ex(imj_t *imj, size_t *count) {
+static bool __imjr_begin_arr_ex(imj_t *imj, size_t *count) {
     if (imj->had_error) return false;
 
     __imj_assert(!imj->done, "already finished processing");
@@ -914,7 +909,7 @@ bool imj_begin_arr_ex(imj_t *imj, size_t *count) {
     return success;
 }
 
-void __imjr_end_arr(imj_t *imj) {
+static void __imjr_end_arr(imj_t *imj) {
     if (imj->had_error) return;
 
     __imj_assert(!imj->done, "already finished processing");
@@ -955,7 +950,7 @@ static void __imjw_pop_necessary_lvls_after_val(imj_t *imj) {
     }
 }
 
-void __imjw_end_arr(imj_t *imj) {
+static void __imjw_end_arr(imj_t *imj) {
     __imj_assert(!imj->done, "already finished processing");
     __imj_assert(imj->lvl_or_null && imj->lvl_or_null->type == IMJ_ARRAY, "must be inside array to exit");
 
@@ -1014,7 +1009,7 @@ static imj_lvl_t *__imj_dive_into_obj(imj_t *imj) {
     return obj;
 }
 
-bool __imjr_begin_obj(imj_t *imj) {
+static bool __imjr_begin_obj(imj_t *imj) {
     if (imj->had_error) {
         return false;
     }
@@ -1045,7 +1040,7 @@ bool __imjr_begin_obj(imj_t *imj) {
     return true;
 }
 
-void __imjw_begin_obj(imj_t *imj) {
+static void __imjw_begin_obj(imj_t *imj) {
     __imj_assert(!imj->done, "already finished processing");
     __imj_assert(imj->lvl_or_null == NULL || imj->lvl_or_null->type == IMJ_KEY_VALUE || imj->lvl_or_null->type == IMJ_ARRAY, "cannot put values directly inside objects");
 
@@ -1074,7 +1069,7 @@ bool imj_begin_obj(imj_t *imj) {
     return success;
 }
 
-void __imjr_end_obj(imj_t *imj) {
+static void __imjr_end_obj(imj_t *imj) {
     if (imj->had_error) return;
 
     __imj_assert(!imj->done, "already finished processing");
@@ -1096,7 +1091,7 @@ void __imjr_end_obj(imj_t *imj) {
     }
 }
 
-void __imjw_end_obj(imj_t *imj) {
+static void __imjw_end_obj(imj_t *imj) {
     __imj_assert(!imj->done, "already finished processing");
     __imj_assert(imj->lvl_or_null->type == IMJ_OBJECT, "must be inside array to exit");
 
@@ -1150,7 +1145,7 @@ static void __imj_dive_into_key(imj_t *imj, bool value_pending) {
     imj->value_pending = value_pending;
 }
 
-bool __imjr_key(imj_t *imj, const char *key) {
+static bool __imjr_key(imj_t *imj, const char *key) {
 
     imj->value_pending = false;
 
@@ -1238,7 +1233,7 @@ bool __imjr_key(imj_t *imj, const char *key) {
     }
 }
 
-void __imjw_key(imj_t *imj, const char *key) {
+static void __imjw_key(imj_t *imj, const char *key) {
     __imj_assert(!imj->done, "already finished processing");
     __imj_assert(imj->lvl_or_null && imj->lvl_or_null->type == IMJ_OBJECT, "keys can only reside inside objects");
 
@@ -1484,7 +1479,7 @@ static bool __imjr_valnull(imj_t *imj) {
     return success && val.kind == IMJ_NULL;
 }
 
-void __imjw_valnull(imj_t *imj) {
+static void __imjw_valnull(imj_t *imj) {
     __imj_assert(!imj->done, "already finished processing");
     __imj_assert(imj->lvl_or_null == NULL || imj->lvl_or_null->type == IMJ_KEY_VALUE || imj->lvl_or_null->type == IMJ_ARRAY, "cannot put values directly inside objects");
 
@@ -1517,7 +1512,7 @@ bool imj_valnull(imj_t *imj) {
     return success;
 }
 
-bool __imjr_valb(imj_t *imj, bool *value, bool default_) {
+static bool __imjr_valb(imj_t *imj, bool *value, bool default_) {
     if (imj->had_error) {
         *value = default_;
         return false;
@@ -1545,7 +1540,7 @@ bool __imjr_valb(imj_t *imj, bool *value, bool default_) {
     return success && val.kind == IMJ_BOOL;
 }
 
-void __imjw_valb(imj_t *imj, bool *value, bool default_) {
+static void __imjw_valb(imj_t *imj, bool *value, bool default_) {
     __imj_assert(!imj->done, "already finished processing");
     __imj_assert(imj->lvl_or_null == NULL || imj->lvl_or_null->type == IMJ_KEY_VALUE || imj->lvl_or_null->type == IMJ_ARRAY, "cannot put values directly inside objects");
 
@@ -1582,7 +1577,7 @@ bool imj_valb(imj_t *imj, bool *value, bool default_) {
     return success;
 }
 
-bool __imjr_vali(imj_t *imj, int *value, int default_) {
+static bool __imjr_vali(imj_t *imj, int *value, int default_) {
     if (imj->had_error) {
         *value = default_;
         return false;
@@ -1647,7 +1642,7 @@ bool imj_vali(imj_t *imj, int *value, int default_) {
     return success;
 }
 
-bool __imjr_vals(imj_t *imj, size_t *value, size_t default_) {
+static bool __imjr_vals(imj_t *imj, size_t *value, size_t default_) {
     if (imj->had_error) {
         *value = default_;
         return false;
@@ -1711,7 +1706,7 @@ bool imj_vals(imj_t *imj, size_t *value, size_t default_) {
     return success;
 }
 
-bool __imjr_valf(imj_t *imj, float *value, float default_) {
+static bool __imjr_valf(imj_t *imj, float *value, float default_) {
     if (imj->had_error) {
         *value = default_;
         return false;
@@ -1775,7 +1770,7 @@ bool imj_valf(imj_t *imj, float *value, float default_) {
     return success;
 }
 
-bool __imjr_vald(imj_t *imj, double *value, double default_) {
+static bool __imjr_vald(imj_t *imj, double *value, double default_) {
     if (imj->had_error) {
         *value = default_;
         return false;
@@ -1838,7 +1833,7 @@ bool imj_vald(imj_t *imj, double *value, double default_) {
     return success;
 }
 
-bool __imjr_valrawsv(imj_t *imj, imj_sv_t *value, const char *default_) {
+static bool __imjr_valrawsv(imj_t *imj, imj_sv_t *value, const char *default_) {
     if (imj->had_error) {
         *value = imj_cstr2sv(default_);
         return false;
@@ -1865,7 +1860,7 @@ bool __imjr_valrawsv(imj_t *imj, imj_sv_t *value, const char *default_) {
     return success && val.kind == IMJ_STRING;
 }
 
-void __imjw_valrawsv(imj_t *imj, imj_sv_t *value, const char *default_) {
+static void __imjw_valrawsv(imj_t *imj, imj_sv_t *value, const char *default_) {
     __imj_assert(!imj->done, "already finished processing");
     __imj_assert(imj->lvl_or_null == NULL || imj->lvl_or_null->type == IMJ_KEY_VALUE || imj->lvl_or_null->type == IMJ_ARRAY, "cannot put values directly inside objects");
 
@@ -1899,7 +1894,7 @@ bool imj_valrawsv(imj_t *imj, imj_sv_t *value, const char *default_) {
     return success;
 }
 
-bool __imjr_valcstr(imj_t *imj, const char **value, const char *default_, imj_alloc alloc, void *allocator) {
+static bool __imjr_valcstr(imj_t *imj, const char **value, const char *default_, imj_alloc alloc, void *allocator) {
     imj_sv_t sv;
     bool success = imj_valrawsv(imj, &sv, default_);
 

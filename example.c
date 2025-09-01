@@ -73,6 +73,9 @@ void player_io(player_t *player, const char *filepath, imj_io_mode_t io_mode) {
         imj_vald(&imj, &player->health, 0);
 
         imj_key(&imj, "weapons");
+
+        imj.render_style = IMJ_STYLE_SINGLE_LINE;
+
         imj_begin_arr(&imj);
             for (size_t i = 0; i < WEAPON_COUNT; ++i) {
                 weapon_t *w = &player->weapons[i];
@@ -87,7 +90,12 @@ void player_io(player_t *player, const char *filepath, imj_io_mode_t io_mode) {
             }
         imj_end_arr(&imj);
 
+        imj.render_style = IMJ_STYLE_PRETTY;
+
         imj_key(&imj, "inventory");
+
+        imj.render_style = IMJ_STYLE_MIN;
+
         imj_begin_arr_ex(&imj, &player->inventory_count);
 
         for (size_t i = 0; i < player->inventory_count; ++i) {
@@ -95,6 +103,7 @@ void player_io(player_t *player, const char *filepath, imj_io_mode_t io_mode) {
         }
 
         imj_end_arr(&imj);
+        imj.render_style = IMJ_STYLE_PRETTY;
 
     imj_end_obj(&imj);
 

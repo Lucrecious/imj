@@ -8,7 +8,7 @@ int main(int argc, char **argv) {
     Cmd cmd = {0};
 
     // build example
-    cmd_append(&cmd, "gcc", "example.c", "-Wall", "-Wextra");
+    cmd_append(&cmd, "gcc", "example.c", "-Wall", "-Wextra", "-Wpedantic");
 
     cmd_append(&cmd, "-O0", "-g", "-ggdb");
 
@@ -19,7 +19,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    cmd_append(&cmd, "gcc", "tester.c", "-Wall", "-Wextra");
+    cmd_append(&cmd, "gcc", "tester.c", "-Wall", "-Wextra", "-Wpedantic");
     cmd_append(&cmd, "-O0", "-g", "-ggdb");
     cmd_append(&cmd, "-o", "tester");
 

@@ -400,7 +400,7 @@ bool array_reading_test(const char *path) {
     return !failed;
 }
 
-int main() {
+int main(void) {
     // basic reading string test
     {
         bool failed = false;

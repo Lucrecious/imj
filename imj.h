@@ -5,11 +5,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
-typedef enum imj_io_mode_t imj_io_mode_t;
 enum imj_io_mode_t {
     IMJ_WRITE,
     IMJ_READ,
 };
+typedef enum imj_io_mode_t imj_io_mode_t;
 
 typedef struct imj_sv_t imj_sv_t;
 struct imj_sv_t {
@@ -44,7 +44,6 @@ struct imj_keys_t {
     size_t capacity;
 };
 
-typedef enum imj_val_kind_t imj_val_kind_t;
 enum imj_val_kind_t {
     IMJ_NONE = 0,
     IMJ_BOOL,
@@ -57,6 +56,7 @@ enum imj_val_kind_t {
     IMJ_ARRAY,
     IMJ_KEY_VALUE,
 };
+typedef enum imj_val_kind_t imj_val_kind_t;
 
 typedef struct imj_lvl_t imj_lvl_t;
 struct imj_lvl_t {
@@ -84,12 +84,12 @@ struct imj_sb_t {
     size_t capacity;
 };
 
-typedef enum imj_render_style_t imj_render_style_t;
 enum imj_render_style_t {
     IMJ_STYLE_MIN = 0,
     IMJ_STYLE_SINGLE_LINE,
     IMJ_STYLE_PRETTY,
 };
+typedef enum imj_render_style_t imj_render_style_t;
 
 typedef struct imj_t imj_t;
 struct imj_t {
@@ -341,11 +341,11 @@ void imj_free(imj_t *lson) {
     free(lson);
 }
 
-typedef enum imj_log_lvl_t imj_log_lvl_t;
 enum imj_log_lvl_t {
     IMJ_LOG_INFO = 0,
     IMJ_LOG_ERROR,
 };
+typedef enum imj_log_lvl_t imj_log_lvl_t;
 
 static void __imj_log(imj_log_lvl_t lvl, const char *format, ...) {
     switch (lvl) {

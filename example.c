@@ -113,7 +113,7 @@ void player_io(player_t *player, const char *filepath, imj_io_mode_t io_mode) {
     }
 }
 
-int main() {
+int main(void) {
     player_t player = player_default();
 
     player_io(&player, "example.json", IMJ_READ);

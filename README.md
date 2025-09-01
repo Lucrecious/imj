@@ -1,5 +1,5 @@
-# ImJSON - an immediate mode JSON reader and writer
-ImJSON is a simple, small and portable immediate mode library for reading and writing JSON files.
+# imJSON - an immediate mode JSON reader and writer
+imJSON is a simple, small and portable immediate mode library for reading and writing JSON files.
 
 Here's a sample:
 ```c

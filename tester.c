@@ -189,7 +189,7 @@ bool compare_games(game_t *game, game_t *dgame) {
 
 bool object_reading_test(const char *path) {
     imj_t imj = {0};
-    bool success = imj_from_file(path, &imj, IMJ_READ);
+    bool success = imj_file(path, &imj, IMJ_READ);
     assert(success);
 
     bool failed = false;
@@ -364,7 +364,7 @@ bool array_reading_test(const char *path) {
 
     for (int i = 0; i < 2; ++i) {
         imj_t imj = {0};
-        bool success = imj_from_file(path, &imj, IMJ_READ);
+        bool success = imj_file(path, &imj, IMJ_READ);
         assert(success);
 
         int num;
@@ -451,7 +451,7 @@ int main() {
             ++read_test_count;
 
             imj_t imj = {0};
-            bool success = imj_from_file(path, &imj, IMJ_READ);
+            bool success = imj_file(path, &imj, IMJ_READ);
             assert(success);
             imj.log_errors = false;
 
@@ -466,7 +466,7 @@ int main() {
             ++read_test_count;
 
             imj_t imj = {0};
-            bool success = imj_from_file(path, &imj, IMJ_READ);
+            bool success = imj_file(path, &imj, IMJ_READ);
             assert(success);
 
             game_io(&game, &imj);
@@ -497,7 +497,7 @@ int main() {
                 }
             } else if (nob_sv_end_with(pathsv, "text.rjson")) {
                 imj_t imj = {0};
-                bool success = imj_from_file(path, &imj, IMJ_READ);
+                bool success = imj_file(path, &imj, IMJ_READ);
                 assert(success);
 
                 const char *str;
@@ -510,7 +510,7 @@ int main() {
                 }
             } else if (nob_sv_end_with(pathsv, "null.rjson")) {
                 imj_t imj = {0};
-                bool success = imj_from_file(path, &imj, IMJ_READ);
+                bool success = imj_file(path, &imj, IMJ_READ);
                 assert(success);
 
                 bool found_null = imj_valnull(&imj);
@@ -522,7 +522,7 @@ int main() {
                 }
             } else if (nob_sv_end_with(pathsv, "number.rjson")) {
                 imj_t imj = {0};
-                bool success = imj_from_file(path, &imj, IMJ_READ);
+                bool success = imj_file(path, &imj, IMJ_READ);
                 assert(success);
 
                 int val;
@@ -535,7 +535,7 @@ int main() {
                 }
             } else if (nob_sv_end_with(pathsv, "bool.rjson")) {
                 imj_t imj = {0};
-                bool success = imj_from_file(path, &imj, IMJ_READ);
+                bool success = imj_file(path, &imj, IMJ_READ);
                 assert(success);
 
                 bool val;

@@ -77,29 +77,49 @@ struct imj_val_t {
     bool b;
 };
 
+typedef struct imj_sb_t imj_sb_t;
+struct imj_sb_t {
+    char *items;
+    size_t count;
+    size_t capacity;
+};
+
+typedef enum imj_render_style_t imj_render_style_t;
+enum imj_render_style_t {
+    IMJ_STYLE_MIN = 0,
+    IMJ_STYLE_PRETTY,
+};
+
 typedef struct imj_t imj_t;
 struct imj_t {
     const char *filepath;
     imj_io_mode_t io_mode;
+    imj_arena_t arena;
+    imj_lvl_t *lvl_or_null;
+    bool done;
+
+    // reading
     imj_sv_t src;
     char *current;
-    imj_arena_t arena;
-    imj_lvl_t *lvl;
     bool value_pending;
-
-    bool done;
     bool log_errors;
     bool had_error;
+
+    // writing
+    imj_sb_t sb;
+    imj_render_style_t render_style;
 };
 
 typedef void*(*imj_alloc)(void *allocator, size_t size_bytes);
 
 imj_sv_t imj_cstr2sv(const char *cstr);
+bool imj_sv_cstr_eq(imj_sv_t sv, const char *cstr);
 
-bool imj_from_file(const char *filepath, imj_t *imj, imj_io_mode_t mode);
+bool imj_file(const char *filepath, imj_t *imj, imj_io_mode_t mode);
 void imj_free(imj_t *lson);
 
 bool imj_key(imj_t *imj, const char *key);
+
 void imj_begin_obj(imj_t *imj);
 void imj_end_obj(imj_t *imj);
 void imj_begin_arr_ex(imj_t *imj, size_t *count);
@@ -107,13 +127,13 @@ void imj_begin_arr(imj_t *imj);
 void imj_end_arr(imj_t *imj);
 
 bool imj_valnull(imj_t *imj);
-void imj_valb(imj_t *imj, bool *value, bool default_);
-void imj_vali(imj_t *imj, int *value, int default_);
-void imj_vals(imj_t *imj, size_t *value, size_t default_);
-void imj_valf(imj_t *imj, float *value, float default_);
-void imj_vald(imj_t *imj, double *value, double default_);
-void imj_valcstr(imj_t *imj, const char **value, const char *default_, imj_alloc alloc, void *allocator);
-void imj_valsv(imj_t *imj, imj_sv_t *value, const char *default_);
+bool imj_valb(imj_t *imj, bool *value, bool default_);
+bool imj_vali(imj_t *imj, int *value, int default_);
+bool imj_vals(imj_t *imj, size_t *value, size_t default_);
+bool imj_valf(imj_t *imj, float *value, float default_);
+bool imj_vald(imj_t *imj, double *value, double default_);
+bool imj_valcstr(imj_t *imj, const char **value, const char *default_, imj_alloc alloc, void *allocator);
+bool imj_valsv(imj_t *imj, imj_sv_t *value, const char *default_);
 
 #endif
 
@@ -172,7 +192,7 @@ static void *__imj_arena_realloc(imj_arena_t *a, void *oldptr, size_t oldsz, siz
 }
 
 
-#define imj_da_push(arr, item, arena) do { \
+#define __imj_da_push(arr, item, arena) do { \
     if ((arr)->count >= (arr)->capacity) { \
         size_t new_cap = (arr)->capacity == 0 ? 8 : (arr)->capacity*2; \
         while (new_cap < (arr)->capacity) new_cap *= 2; \
@@ -197,40 +217,51 @@ imj_sv_t imj_cstr2sv(const char *cstr) {
     };
 }
 
-static void __imj_skip_whitespace(imj_t *imj);
+static void __imjr_skip_whitespace(imj_t *imj);
 
-bool imj_from_file(const char *filepath, imj_t *imj, imj_io_mode_t mode) {
-    const char *open_mode = mode == IMJ_READ ? "r" : "w";
-    FILE *file = fopen(filepath, open_mode);
-    
-    if (!file) return false;
-    
-    fseek(file, 0, SEEK_END);
-    long size = ftell(file);
-    fseek(file, 0, SEEK_SET);
-    
-    char *buffer = __imj_arena_alloc(&imj->arena, size + 1);
-    if (!buffer) {
+bool imj_file(const char *filepath, imj_t *imj, imj_io_mode_t mode) {
+    *imj = (imj_t){0};
+
+    switch (mode) {
+    case IMJ_READ: {
+        FILE *file = fopen(filepath, "r");
+        
+        if (!file) return false;
+        
+        fseek(file, 0, SEEK_END);
+        long size = ftell(file);
+        fseek(file, 0, SEEK_SET);
+        
+        char *buffer = __imj_arena_alloc(&imj->arena, size + 1);
+        if (!buffer) {
+            fclose(file);
+            return false;
+        }
+        
+        fread(buffer, 1, size, file);
+        buffer[size] = '\0';
         fclose(file);
-        return false;
-    }
-    
-    fread(buffer, 1, size, file);
-    buffer[size] = '\0';
-    fclose(file);
-    
-    imj->filepath = filepath;
-    imj->src.data = buffer;
-    imj->src.length = size;
-    imj->current = (char*)imj->src.data;
-    imj->log_errors = true;
-    imj->io_mode = mode;
+        
+        imj->filepath = filepath;
+        imj->src.data = buffer;
+        imj->src.length = size;
+        imj->current = (char*)imj->src.data;
+        imj->log_errors = true;
+        imj->io_mode = mode;
 
-    __imj_skip_whitespace(imj);
-    if (*imj->current != '\0') {
-        imj->value_pending = true;
+        __imjr_skip_whitespace(imj);
+        if (*imj->current != '\0') {
+            imj->value_pending = true;
+        }
+        break;
     }
-    
+
+    case IMJ_WRITE: {
+        imj->filepath = filepath;
+        imj->io_mode = mode;
+        break;
+    }
+    }
     return true;
 }
 
@@ -257,7 +288,7 @@ static void __imj_log(imj_log_lvl_t lvl, const char *format, ...) {
     va_end(args);
     printf("\n");
 }
-static bool imj_sv_cstr_eq(imj_sv_t sv, const char *cstr) {
+bool imj_sv_cstr_eq(imj_sv_t sv, const char *cstr) {
     if (cstr == NULL) return false;
 
     size_t i = 0;
@@ -280,7 +311,7 @@ static char __imj_next(imj_t *imj) {
     return c;
 }
 
-static bool __imj_consume(imj_t *imj, char c) {
+static bool __imjr_consume(imj_t *imj, char c) {
     char check = __imj_next(imj);
     if (check == c) {
         return true;
@@ -289,7 +320,7 @@ static bool __imj_consume(imj_t *imj, char c) {
     return false;
 }
 
-static void __imj_parse_error(imj_t *imj, const char *message) {
+static void __imjr_parse_error(imj_t *imj, const char *message) {
     if (imj->had_error) return;
     imj->had_error = true;
 
@@ -309,7 +340,7 @@ static void __imj_parse_error(imj_t *imj, const char *message) {
     __imj_log(IMJ_LOG_ERROR, "%s:%zu:%zu: %s", imj->filepath, line_count+1, col, message);
 }
 
-static bool __imj_is_whitespace(char c) {
+static bool __imjr_is_whitespace(char c) {
     switch (c) {
     case ' ': case '\n':
     case '\r': case '\t': return true;
@@ -317,16 +348,12 @@ static bool __imj_is_whitespace(char c) {
     }
 }
 
-static void __imj_skip_whitespace(imj_t *imj) {
-    while (__imj_is_whitespace(*imj->current)) ++imj->current;
+static void __imjr_skip_whitespace(imj_t *imj) {
+    while (__imjr_is_whitespace(*imj->current)) ++imj->current;
 }
 
-static bool imj_peek(imj_t *imj, char c) {
-    return *imj->current == c;
-}
-
-static bool __imj_match(imj_t *imj, char c) {
-    if (imj_peek(imj, c)) {
+static bool __imjr_match(imj_t *imj, char c) {
+    if (*imj->current == c) {
         __imj_next(imj);
         return true;
     }
@@ -334,16 +361,16 @@ static bool __imj_match(imj_t *imj, char c) {
     return false;
 }
 static void __imj_pop_lvl(imj_t *imj) {
-    imj->lvl = imj->lvl->prev;
+    imj->lvl_or_null = imj->lvl_or_null->prev;
 }
 
-static bool __imj_read_str(imj_t *imj, imj_sv_t *ret) {
+static bool __imjr_read_str(imj_t *imj, imj_sv_t *ret) {
     char *start = imj->current;
     char *previous = imj->current++;
     while (true) {
         if (*previous == '\"') break;
         if (*previous == '\0') {
-            __imj_parse_error(imj, "found end of file before end of string.");
+            __imjr_parse_error(imj, "found end of file before end of string.");
             return false;
         }
 
@@ -370,7 +397,7 @@ static bool __imj_read_str(imj_t *imj, imj_sv_t *ret) {
                     case 'e': case 'E': case 'f': case 'F': break;
 
                     default: {
-                        __imj_parse_error(imj, "invalid hex digit.");
+                        __imjr_parse_error(imj, "invalid hex digit.");
                         return false;
                     }
                     }
@@ -383,7 +410,7 @@ static bool __imj_read_str(imj_t *imj, imj_sv_t *ret) {
             }
 
             default: {
-                __imj_parse_error(imj, "invalid escape sequence.");
+                __imjr_parse_error(imj, "invalid escape sequence.");
                 return false;
             }
             }
@@ -401,13 +428,13 @@ static bool __imj_read_str(imj_t *imj, imj_sv_t *ret) {
     return true;
 }
 
-static void __imj_skip_value(imj_t *imj);
+static void __imjr_skip_value(imj_t *imj);
 
-static void __imj_skip_str(imj_t *imj) {
+static void __imjr_skip_str(imj_t *imj) {
     char *previous = imj->current++;
     while (*previous != '\"') {
         if (*previous == '\0') {
-            __imj_parse_error(imj, "source ended before string closed");
+            __imjr_parse_error(imj, "source ended before string closed");
             return;
         }
 
@@ -419,100 +446,100 @@ static void __imj_skip_str(imj_t *imj) {
     }
 }
 
-static void __imj_skip_obj(imj_t *imj) {
+static void __imjr_skip_obj(imj_t *imj) {
     while (true) {
-        __imj_skip_whitespace(imj);
-        if (__imj_match(imj, '}')) return;
+        __imjr_skip_whitespace(imj);
+        if (__imjr_match(imj, '}')) return;
         if (*imj->current == '\0') {
-            __imj_parse_error(imj, "expected '}' before end of file");
+            __imjr_parse_error(imj, "expected '}' before end of file");
             return;
         }
 
         if (*imj->current == '\"') {
             ++imj->current;
-            __imj_skip_str(imj);
+            __imjr_skip_str(imj);
         } else {
-            __imj_parse_error(imj, "expected key");
+            __imjr_parse_error(imj, "expected key");
             return;
         }
         
-        __imj_skip_whitespace(imj);
-        if (!__imj_consume(imj, ':')) {
-            __imj_parse_error(imj, "expected ':' after key");
+        __imjr_skip_whitespace(imj);
+        if (!__imjr_consume(imj, ':')) {
+            __imjr_parse_error(imj, "expected ':' after key");
             return;
         }
 
-        __imj_skip_whitespace(imj);
-        __imj_skip_value(imj);
-        __imj_skip_whitespace(imj);
+        __imjr_skip_whitespace(imj);
+        __imjr_skip_value(imj);
+        __imjr_skip_whitespace(imj);
 
-        if (__imj_match(imj, ',')) {
-            __imj_skip_whitespace(imj);
+        if (__imjr_match(imj, ',')) {
+            __imjr_skip_whitespace(imj);
             if (*imj->current == '}') {
-                __imj_parse_error(imj, "cannot have ',' before ending an object");
+                __imjr_parse_error(imj, "cannot have ',' before ending an object");
                 return;
             }
         }
     }
 }
 
-static void __imj_skip_arr(imj_t *imj) {
+static void __imjr_skip_arr(imj_t *imj) {
     while (true) {
-        __imj_skip_whitespace(imj);
-        if (__imj_match(imj, ']')) return;
+        __imjr_skip_whitespace(imj);
+        if (__imjr_match(imj, ']')) return;
 
         if (*imj->current == '\0') {
-            __imj_parse_error(imj, "expected ']' before end of file");
+            __imjr_parse_error(imj, "expected ']' before end of file");
             return;
         }
 
-        __imj_skip_value(imj);
+        __imjr_skip_value(imj);
 
-        __imj_skip_whitespace(imj);
+        __imjr_skip_whitespace(imj);
 
-        if (__imj_match(imj, ',')) {
-            __imj_skip_whitespace(imj);
+        if (__imjr_match(imj, ',')) {
+            __imjr_skip_whitespace(imj);
             if (*imj->current == ']') {
-                __imj_parse_error(imj, "cannot have ',' before ending an array");
+                __imjr_parse_error(imj, "cannot have ',' before ending an array");
                 return;
             }
         }
     }
 }
 
-static void __imj_skip_until_whitespace_or_comma(imj_t *imj) {
+static void __imjr_skip_until_whitespace_or_comma(imj_t *imj) {
     while (true) {
         switch (*imj->current) {
         case '\0': case ',': case ']': case '}': return;
         default: break;
         }
 
-        if (__imj_is_whitespace(*imj->current)) return;
+        if (__imjr_is_whitespace(*imj->current)) return;
         ++imj->current;
     }
 }
 
-static void __imj_skip_value(imj_t *imj) {
+static void __imjr_skip_value(imj_t *imj) {
     switch (*imj->current) {
     case '"': {
         ++imj->current;
-        __imj_skip_str(imj);
+        __imjr_skip_str(imj);
         break;
     }
 
     case '{': {
         ++imj->current;
-        __imj_skip_obj(imj);
+        __imjr_skip_obj(imj);
         break;
     }
 
     case '[': {
         ++imj->current;
-        __imj_skip_arr(imj);
+        __imjr_skip_arr(imj);
         break;
     }
 
-    default: __imj_skip_until_whitespace_or_comma(imj); break;
+    default: __imjr_skip_until_whitespace_or_comma(imj); break;
     }
 }
 
@@ -520,19 +547,19 @@ static void __imj_dive_into_arr(imj_t *imj, bool use_left_off) {
     imj_lvl_t *arr = __imj_arena_alloc(&imj->arena, sizeof(imj_lvl_t));
     *arr = (imj_lvl_t){0};
     arr->type = IMJ_ARRAY;
-    arr->prev = imj->lvl;
+    arr->prev = imj->lvl_or_null;
     arr->left_off_or_null = use_left_off ? imj->current : NULL;
-    imj->lvl = arr;
+    imj->lvl_or_null = arr;
 }
 
-static void __imj_update_array_if_necessary(imj_t *imj) {
-    if (imj->lvl && imj->lvl->type == IMJ_ARRAY) {
-        ++imj->lvl->count;
+static void __imjr_update_array_if_necessary(imj_t *imj) {
+    if (imj->lvl_or_null && imj->lvl_or_null->type == IMJ_ARRAY) {
+        ++imj->lvl_or_null->count;
 
-        __imj_skip_whitespace(imj);
-        if (__imj_match(imj, ',')) {
+        __imjr_skip_whitespace(imj);
+        if (__imjr_match(imj, ',')) {
             imj->value_pending = true;
-            __imj_skip_whitespace(imj);
+            __imjr_skip_whitespace(imj);
         } else {
             imj->value_pending = false;
         }
@@ -543,16 +570,16 @@ void imj_begin_arr(imj_t *imj) {
     if (imj->had_error) return;
 
     __imj_assert(!imj->done, "already finished processing");
-    __imj_assert(!imj->lvl || imj->lvl->type == IMJ_KEY_VALUE || imj->lvl->type == IMJ_ARRAY, "cannot begin array directly inside object");
+    __imj_assert(!imj->lvl_or_null || imj->lvl_or_null->type == IMJ_KEY_VALUE || imj->lvl_or_null->type == IMJ_ARRAY, "cannot begin array directly inside object");
 
-    __imj_skip_whitespace(imj);
+    __imjr_skip_whitespace(imj);
 
     imj->value_pending = true;
     bool entered = false;
-    if (!__imj_match(imj, '[')) {
+    if (!__imjr_match(imj, '[')) {
         imj->value_pending = false;
     } else {
-        __imj_skip_whitespace(imj);
+        __imjr_skip_whitespace(imj);
         imj->value_pending = *imj->current != ']';
         entered = true;
     }
@@ -564,17 +591,17 @@ void imj_begin_arr_ex(imj_t *imj, size_t *count) {
     if (imj->had_error) return;
 
     __imj_assert(!imj->done, "already finished processing");
-    __imj_assert(!imj->lvl || imj->lvl->type == IMJ_KEY_VALUE || imj->lvl->type == IMJ_ARRAY, "cannot begin array directly inside object");
+    __imj_assert(!imj->lvl_or_null || imj->lvl_or_null->type == IMJ_KEY_VALUE || imj->lvl_or_null->type == IMJ_ARRAY, "cannot begin array directly inside object");
 
-    __imj_skip_whitespace(imj);
+    __imjr_skip_whitespace(imj);
 
     bool value_pending = true;
     bool entered = false;
-    if (!__imj_match(imj, '[')) {
+    if (!__imjr_match(imj, '[')) {
         *count = 0;
         value_pending = false;
     } else {
-        __imj_skip_whitespace(imj);
+        __imjr_skip_whitespace(imj);
 
         char *start = imj->current;
 
@@ -582,10 +609,10 @@ void imj_begin_arr_ex(imj_t *imj, size_t *count) {
         size_t seeked_count = 0;
 
         while (true) {
-            __imj_skip_whitespace(imj);
+            __imjr_skip_whitespace(imj);
 
             if (*imj->current == '\0') {
-                __imj_parse_error(imj, "expected ']' before end of file");
+                __imjr_parse_error(imj, "expected ']' before end of file");
                 *count = 0;
                 break;
             }
@@ -594,31 +621,31 @@ void imj_begin_arr_ex(imj_t *imj, size_t *count) {
                 break;
             }
 
-            __imj_skip_value(imj);
-            __imj_skip_whitespace(imj);
+            __imjr_skip_value(imj);
+            __imjr_skip_whitespace(imj);
             ++seeked_count;
 
-            if (__imj_match(imj, ',')) {
-                __imj_skip_whitespace(imj);
+            if (__imjr_match(imj, ',')) {
+                __imjr_skip_whitespace(imj);
 
                 if (*imj->current == ']') {
-                    __imj_parse_error(imj, "cannot use comma before closing array");
+                    __imjr_parse_error(imj, "cannot use comma before closing array");
                     return;
                 }
             } else {
                 if (*imj->current != ']') {
-                    __imj_parse_error(imj, "expected ']' to close array");
+                    __imjr_parse_error(imj, "expected ']' to close array");
                     return;
                 }
 
-                __imj_skip_whitespace(imj);
+                __imjr_skip_whitespace(imj);
             }
         }
 
         *count = seeked_count;
 
-        __imj_skip_whitespace(imj);
-        imj->value_pending = value_pending && __imj_match(imj, ']');
+        __imjr_skip_whitespace(imj);
+        imj->value_pending = value_pending && __imjr_match(imj, ']');
         imj->current = start;
     }
 
@@ -629,24 +656,24 @@ void imj_end_arr(imj_t *imj) {
     if (imj->had_error) return;
 
     __imj_assert(!imj->done, "already finished processing");
-    __imj_assert(imj->lvl && imj->lvl->type == IMJ_ARRAY, "ending array not inside of array");
+    __imj_assert(imj->lvl_or_null && imj->lvl_or_null->type == IMJ_ARRAY, "ending array not inside of array");
 
-    if (imj->lvl->left_off_or_null) {
-        __imj_skip_whitespace(imj);
-        __imj_skip_arr(imj);
+    if (imj->lvl_or_null->left_off_or_null) {
+        __imjr_skip_whitespace(imj);
+        __imjr_skip_arr(imj);
     }
 
     __imj_pop_lvl(imj);
 
-    if (imj->lvl) {
-        if (imj->lvl->type == IMJ_KEY_VALUE) {
+    if (imj->lvl_or_null) {
+        if (imj->lvl_or_null->type == IMJ_KEY_VALUE) {
             __imj_pop_lvl(imj);
         }
 
-        __imj_update_array_if_necessary(imj);
+        __imjr_update_array_if_necessary(imj);
     }
 
-    if (imj->lvl == NULL) {
+    if (imj->lvl_or_null == NULL) {
         imj->done = true;
     }
 }
@@ -657,29 +684,29 @@ void imj_begin_obj(imj_t *imj) {
     }
 
     __imj_assert(!imj->done, "already finished processing");
-    __imj_assert(!imj->lvl || imj->lvl->type == IMJ_KEY_VALUE || imj->lvl->type == IMJ_ARRAY, "cannot start object directly inside object");
+    __imj_assert(!imj->lvl_or_null || imj->lvl_or_null->type == IMJ_KEY_VALUE || imj->lvl_or_null->type == IMJ_ARRAY, "cannot start object directly inside object");
 
     imj_lvl_t *obj = __imj_arena_alloc(&imj->arena, sizeof(imj_lvl_t));
     *obj = (imj_lvl_t){0};
     obj->type = IMJ_OBJECT;
-    obj->prev = imj->lvl;
-    imj->lvl = obj;
+    obj->prev = imj->lvl_or_null;
+    imj->lvl_or_null = obj;
 
     bool incorrect_pending_value = imj->value_pending && *imj->current != '{';
-    bool is_at_root = imj->lvl->prev == NULL;
+    bool is_at_root = imj->lvl_or_null->prev == NULL;
     if (incorrect_pending_value || (!is_at_root && !imj->value_pending)) {
         obj->left_off_or_null = NULL;
         return;
     }
 
-    __imj_skip_whitespace(imj);
+    __imjr_skip_whitespace(imj);
 
 
-    if (!__imj_consume(imj, '{')) {
-        __imj_parse_error(imj, "expected '{' for object");
+    if (!__imjr_consume(imj, '{')) {
+        __imjr_parse_error(imj, "expected '{' for object");
     }
 
-    __imj_skip_whitespace(imj);
+    __imjr_skip_whitespace(imj);
 
     obj->left_off_or_null = imj->current;
 }
@@ -688,24 +715,24 @@ void imj_end_obj(imj_t *imj) {
     if (imj->had_error) return;
 
     __imj_assert(!imj->done, "already finished processing");
-    __imj_assert(imj->lvl && imj->lvl->type == IMJ_OBJECT, "cannot end object without being inside an object");
+    __imj_assert(imj->lvl_or_null && imj->lvl_or_null->type == IMJ_OBJECT, "cannot end object without being inside an object");
 
-    if (imj->lvl->left_off_or_null) {
-        imj->current = imj->lvl->left_off_or_null;
-        __imj_skip_obj(imj);
+    if (imj->lvl_or_null->left_off_or_null) {
+        imj->current = imj->lvl_or_null->left_off_or_null;
+        __imjr_skip_obj(imj);
     }
 
     __imj_pop_lvl(imj);
 
-    if (imj->lvl) {
-        if (imj->lvl->type == IMJ_KEY_VALUE) {
+    if (imj->lvl_or_null) {
+        if (imj->lvl_or_null->type == IMJ_KEY_VALUE) {
             __imj_pop_lvl(imj);
         }
 
-        __imj_update_array_if_necessary(imj);
+        __imjr_update_array_if_necessary(imj);
     }
 
-    if (imj->lvl == NULL) {
+    if (imj->lvl_or_null == NULL) {
         imj->done = true;
     }
 }
@@ -714,8 +741,8 @@ static void __imj_dive_into_key(imj_t *imj, bool value_pending) {
     imj_lvl_t *lvl = __imj_arena_alloc(&imj->arena, sizeof(imj_lvl_t));
     *lvl = (imj_lvl_t){0};
     lvl->type = IMJ_KEY_VALUE;
-    lvl->prev = imj->lvl;
-    imj->lvl = lvl;
+    lvl->prev = imj->lvl_or_null;
+    imj->lvl_or_null = lvl;
     imj->value_pending = value_pending;
 }
 
@@ -726,11 +753,11 @@ bool imj_key(imj_t *imj, const char *key) {
     if (imj->had_error) return false;
 
     __imj_assert(!imj->done, "already finished processing");
-    __imj_assert(imj->lvl && imj->lvl->type == IMJ_OBJECT, "keys can only reside inside objects");
+    __imj_assert(imj->lvl_or_null && imj->lvl_or_null->type == IMJ_OBJECT, "keys can only reside inside objects");
 
-    imj_lvl_t *obj = imj->lvl;
+    imj_lvl_t *obj = imj->lvl_or_null;
 
-    if (imj->lvl->left_off_or_null == NULL) {
+    if (imj->lvl_or_null->left_off_or_null == NULL) {
         __imj_dive_into_key(imj, false);
         return false;
     }
@@ -750,29 +777,29 @@ bool imj_key(imj_t *imj, const char *key) {
 
     while (true) {
         if (*imj->current == '\0') {
-            __imj_parse_error(imj, "object needs '}' to close");
+            __imjr_parse_error(imj, "object needs '}' to close");
             return false;
         }
 
-        if (__imj_match(imj, '\"')) {
+        if (__imjr_match(imj, '\"')) {
             imj_sv_t key_name;
-            if (!__imj_read_str(imj, &key_name)) return false;
+            if (!__imjr_read_str(imj, &key_name)) return false;
 
-            __imj_skip_whitespace(imj);
+            __imjr_skip_whitespace(imj);
 
-            if (!__imj_consume(imj, ':')) {
-                __imj_parse_error(imj, "expected ':' after key");
+            if (!__imjr_consume(imj, ':')) {
+                __imjr_parse_error(imj, "expected ':' after key");
                 return false;
             }
 
-            __imj_skip_whitespace(imj);
+            __imjr_skip_whitespace(imj);
 
             imj_key_t imj_key = {
                 .name = key_name,
                 .loc = imj->current,
             };
 
-            imj_da_push(&obj->keys, imj_key, &imj->arena);
+            __imj_da_push(&obj->keys, imj_key, &imj->arena);
 
             if (imj_sv_cstr_eq(key_name, key)) {
                 __imj_dive_into_key(imj, true);
@@ -780,14 +807,14 @@ bool imj_key(imj_t *imj, const char *key) {
             }
 
 
-            __imj_skip_value(imj);
+            __imjr_skip_value(imj);
 
-            __imj_skip_whitespace(imj);
+            __imjr_skip_whitespace(imj);
 
-            if (__imj_match(imj, ',')) {
-                __imj_skip_whitespace(imj);
-                if (imj_peek(imj, '}')) {
-                    __imj_parse_error(imj, "cannot end object with ','");
+            if (__imjr_match(imj, ',')) {
+                __imjr_skip_whitespace(imj);
+                if (*imj->current == '}') {
+                    __imjr_parse_error(imj, "cannot end object with ','");
                     return false;
                 }
             }
@@ -796,18 +823,18 @@ bool imj_key(imj_t *imj, const char *key) {
         } else {
             // no value consumed, we haven't found the key
             // but user expects value to be pending.
-            if (__imj_consume(imj, '}')) {
+            if (__imjr_consume(imj, '}')) {
                 __imj_dive_into_key(imj, false);
                 return false;
             }
 
-            __imj_parse_error(imj, "unexpected character.");
+            __imjr_parse_error(imj, "unexpected character.");
             return false;
         }
     }
 }
 
-static bool __imj_is_digit(char c) {
+static bool __imjr_is_digit(char c) {
     switch (c) {
     case '0': case __imj_cases_non_zero: return true;
     }
@@ -816,7 +843,7 @@ static bool __imj_is_digit(char c) {
 
 static bool __imj_read_num(imj_t *imj, imj_val_t *ret) {
     *ret = __imj_val_error;
-    bool is_negative = __imj_match(imj, '-');
+    bool is_negative = __imjr_match(imj, '-');
 
     size_t nat = 0;
     double mag = 10;
@@ -836,7 +863,7 @@ static bool __imj_read_num(imj_t *imj, imj_val_t *ret) {
     case __imj_cases_non_zero: {
         nat = *imj->current - '0';
         ++imj->current;
-        while (__imj_is_digit(*imj->current)) {
+        while (__imjr_is_digit(*imj->current)) {
             size_t digit = *imj->current - '0';
             nat *= 10;
             nat += digit;
@@ -846,18 +873,18 @@ static bool __imj_read_num(imj_t *imj, imj_val_t *ret) {
     }
 
     default: {
-        __imj_parse_error(imj, "expected digit");
+        __imjr_parse_error(imj, "expected digit");
         return false;
     }
     }
 
-    if (__imj_match(imj, '.')) {
-        if (!__imj_is_digit(*imj->current)) {
-            __imj_parse_error(imj, "expected digit");
+    if (__imjr_match(imj, '.')) {
+        if (!__imjr_is_digit(*imj->current)) {
+            __imjr_parse_error(imj, "expected digit");
             return false;
         }
 
-        while (__imj_is_digit(*imj->current)) {
+        while (__imjr_is_digit(*imj->current)) {
             double d = (double)(*imj->current - '0');
             dec += d/mag;
             mag *= 10;
@@ -866,19 +893,19 @@ static bool __imj_read_num(imj_t *imj, imj_val_t *ret) {
         }
     }
 
-    if (__imj_match(imj, 'e') || __imj_match(imj, 'E')) {
+    if (__imjr_match(imj, 'e') || __imjr_match(imj, 'E')) {
         has_exp = true;
 
-        if (__imj_match(imj, '-')) {
+        if (__imjr_match(imj, '-')) {
             exp_neg = true;
-        } else __imj_match(imj, '+');
+        } else __imjr_match(imj, '+');
 
-        if (!__imj_is_digit(*imj->current)) {
-            __imj_parse_error(imj, "expected digit");
+        if (!__imjr_is_digit(*imj->current)) {
+            __imjr_parse_error(imj, "expected digit");
             return false;
         }
 
-        while (__imj_is_digit(*imj->current)) {
+        while (__imjr_is_digit(*imj->current)) {
             exp *= 10;
             exp += (*imj->current - '0');
             ++imj->current;
@@ -903,18 +930,18 @@ static bool __imj_read_num(imj_t *imj, imj_val_t *ret) {
     return true;
 }
 
-static bool __imj_read_val(imj_t *imj, imj_val_t *ret) {
+static bool __imjr_read_val(imj_t *imj, imj_val_t *ret) {
     switch (*imj->current) {
     case '{': {
         ++imj->current;
-        __imj_skip_obj(imj);
+        __imjr_skip_obj(imj);
         ret->kind = IMJ_OBJECT;
         break;
     }
 
     case '[': {
         ++imj->current;
-        __imj_skip_arr(imj);
+        __imjr_skip_arr(imj);
         ret->kind = IMJ_ARRAY;
         break;
     }
@@ -928,7 +955,7 @@ static bool __imj_read_val(imj_t *imj, imj_val_t *ret) {
     case '"': {
         imj_sv_t sv;
         ++imj->current;
-        if (!__imj_read_str(imj, &sv)) return false;
+        if (!__imjr_read_str(imj, &sv)) return false;
         *ret = (imj_val_t){0};
         ret->kind = IMJ_STRING;
         ret->sv = sv;
@@ -937,7 +964,7 @@ static bool __imj_read_val(imj_t *imj, imj_val_t *ret) {
 
     default: {
         char *start = imj->current;
-        __imj_skip_until_whitespace_or_comma(imj);
+        __imjr_skip_until_whitespace_or_comma(imj);
         imj_sv_t sv = {
             .data = start,
             .length = imj->current-start,
@@ -958,7 +985,7 @@ static bool __imj_read_val(imj_t *imj, imj_val_t *ret) {
             ret->i = (long)false;
             ret->d = (double)false;
         } else {
-            __imj_parse_error(imj, "unexpected value");
+            __imjr_parse_error(imj, "unexpected value");
             return false;
         }
         break;
@@ -968,14 +995,14 @@ static bool __imj_read_val(imj_t *imj, imj_val_t *ret) {
     return true;
 }
 
-static bool __imj_use_default_value_and_pop_lvl_if_possible(imj_t *imj) {
+static bool __imjr_use_default_value_and_pop_lvl_if_possible(imj_t *imj) {
     bool value_pending = imj->value_pending;
     imj->value_pending = false;
 
-    if (imj->lvl) {
-        switch (imj->lvl->type) {
+    if (imj->lvl_or_null) {
+        switch (imj->lvl_or_null->type) {
         case IMJ_OBJECT: {
-            __imj_parse_error(imj, "cannot have objects directly inside objects");
+            __imjr_parse_error(imj, "cannot have objects directly inside objects");
             return true;
         }
 
@@ -993,218 +1020,578 @@ static bool __imj_use_default_value_and_pop_lvl_if_possible(imj_t *imj) {
     return !value_pending;
 }
 
-bool imj_valnull(imj_t *imj) {
+void __imjw_add_comma_and_ws_if_necessary(imj_t *imj) {
+    if (imj->lvl_or_null) {
+        switch (imj->lvl_or_null->type) {
+        case IMJ_ARRAY:
+        case IMJ_OBJECT: {
+            if (imj->lvl_or_null->count > 0) {
+                switch (imj->render_style)  {
+                case IMJ_STYLE_MIN: {
+                    __imjw_sb_add_str(&imj->sb, ",", 1, &imj->arena);
+                    break;
+                }
+                case IMJ_STYLE_PRETTY: {
+                    __imjw_sb_add_str(&imj->sb, ",\n", 2, &imj->arena);
+                    break;
+                }
+                }
+            }
+
+            ++imj->lvl_or_null->count;
+            break;
+        }
+        default: __imj_assert(false, "invalid lvl type for writing"); break;
+        }
+    }
+}
+
+static void __imjw_sb_add_str_as_jsonstr(imj_sb_t *sb, const char *s, size_t n, imj_arena_t *arena) {
+    __imj_da_push(sb, '"', arena);
+    for (char *c = (char*)s; c < s+n; ++c) {
+        switch (*c) {
+        case '"': 
+        case '\\': 
+        case '/':
+        case '\b': {
+            __imj_da_push(sb, '\\', arena);
+            break;
+        }
+        
+        case '\f': {
+            __imj_da_push(sb, '\\', arena);
+            __imj_da_push(sb, 'f', arena);
+            break;
+        }
+
+        case '\n': {
+            __imj_da_push(sb, '\\', arena);
+            __imj_da_push(sb, 'n', arena);
+            break;
+        }
+
+        case '\r': {
+            __imj_da_push(sb, '\\', arena);
+            __imj_da_push(sb, 'n', arena);
+            break;
+        }
+
+        case '\t': {
+            __imj_da_push(sb, '\\', arena);
+            __imj_da_push(sb, 't', arena);
+            break;
+        }
+
+        default: {
+            __imj_da_push(sb, *c, arena);
+            break;
+        }
+        }
+    }
+
+    __imj_da_push(sb, '"', arena);
+}
+
+static void __imjw_sb_add_str(imj_sb_t *sb, const char *s, size_t n, imj_arena_t *arena) {
+    for (size_t i = 0; i < n; ++i) __imj_da_push(sb, s[i], arena);
+}
+
+static void __imjw_pop_necessary_lvls_after_val(imj_t *imj) {
+    if (imj->lvl_or_null) {
+        switch (imj->lvl_or_null->type) {
+        case IMJ_ARRAY: break;
+        case IMJ_KEY_VALUE: {
+            __imj_pop_lvl(imj);
+            break;
+        }
+        case IMJ_OBJECT: {
+            __imj_assert(false, "invalid level");
+            break;
+        }
+
+        default: __imj_assert(false, "invalid enum as level"); break;
+        }
+    }
+}
+
+static bool __imjr_valnull(imj_t *imj) {
     if (imj->had_error) {
         return false;
     }
 
     __imj_assert(!imj->done, "already finished processing");
-    __imj_assert(imj->lvl == NULL || imj->lvl->type == IMJ_KEY_VALUE || imj->lvl->type == IMJ_ARRAY, "cannot put values directly inside objects");
+    __imj_assert(imj->lvl_or_null == NULL || imj->lvl_or_null->type == IMJ_KEY_VALUE || imj->lvl_or_null->type == IMJ_ARRAY, "cannot put values directly inside objects");
 
 
-    if (__imj_use_default_value_and_pop_lvl_if_possible(imj)) {
+    if (__imjr_use_default_value_and_pop_lvl_if_possible(imj)) {
         return false;
     }
 
     imj_val_t val;
-    bool success = __imj_read_val(imj, &val);
+    bool success = __imjr_read_val(imj, &val);
 
-    __imj_update_array_if_necessary(imj);
-
-    if (imj->lvl == NULL) {
-        imj->done = true;
-    }
+    __imjr_update_array_if_necessary(imj);
 
     return success && val.kind == IMJ_NULL;
 }
 
-void imj_valb(imj_t *imj, bool *value, bool default_) {
+void __imjw_valnull(imj_t *imj) {
+    __imj_assert(!imj->done, "already finished processing");
+    __imj_assert(imj->lvl_or_null == NULL || imj->lvl_or_null->type == IMJ_KEY_VALUE || imj->lvl_or_null->type == IMJ_ARRAY, "cannot put values directly inside objects");
+
+    __imjw_add_comma_and_ws_if_necessary(imj);
+
+    __imjw_sb_add_str(&imj->sb, "null", 4, &imj->arena);
+
+    __imjw_pop_necessary_lvls_after_val(imj);
+}
+
+bool imj_valnull(imj_t *imj) {
+    bool success = true;
+    switch (imj->io_mode) {
+    case IMJ_READ: {
+        success = __imjr_valnull(imj);
+        break;
+    }
+
+    case IMJ_WRITE: {
+        __imjw_valnull(imj);
+        break;
+    }
+    }
+
+    if (imj->lvl_or_null == NULL) {
+        imj->done = true;
+    }
+
+    return success;
+}
+
+bool __imjr_valb(imj_t *imj, bool *value, bool default_) {
     if (imj->had_error) {
         *value = default_;
-        return;
+        return false;
     }
 
     __imj_assert(!imj->done, "already finished processing");
-    __imj_assert(imj->lvl == NULL || imj->lvl->type == IMJ_KEY_VALUE || imj->lvl->type == IMJ_ARRAY, "cannot put values directly inside objects");
+    __imj_assert(imj->lvl_or_null == NULL || imj->lvl_or_null->type == IMJ_KEY_VALUE || imj->lvl_or_null->type == IMJ_ARRAY, "cannot put values directly inside objects");
 
 
-    if (__imj_use_default_value_and_pop_lvl_if_possible(imj)) {
+    if (__imjr_use_default_value_and_pop_lvl_if_possible(imj)) {
         *value = default_;
-        return;
+        return false;
     }
 
     imj_val_t val;
-    bool success = __imj_read_val(imj, &val);
+    bool success = __imjr_read_val(imj, &val);
     if (success && val.kind == IMJ_BOOL) {
         *value = (bool)val.i;
     } else {
         *value = default_;
     }
 
-    __imj_update_array_if_necessary(imj);
+    __imjr_update_array_if_necessary(imj);
 
-    if (imj->lvl == NULL) {
-        imj->done = true;
-    }
+    return success && val.kind == IMJ_BOOL;
 }
 
-void imj_vali(imj_t *imj, int *value, int default_) {
+void __imjw_valb(imj_t *imj, bool *value, bool default_) {
+    __imj_assert(!imj->done, "already finished processing");
+    __imj_assert(imj->lvl_or_null == NULL || imj->lvl_or_null->type == IMJ_KEY_VALUE || imj->lvl_or_null->type == IMJ_ARRAY, "cannot put values directly inside objects");
+
+    __imjw_add_comma_and_ws_if_necessary(imj);
+
+    bool val = value ? *value : default_;
+    __imjw_sb_add_str(&imj->sb,
+        val ? "true" : "false",
+        val ? 4 : 5,
+        &imj->arena);
+
+    __imjw_pop_necessary_lvls_after_val(imj);
+}
+
+bool imj_valb(imj_t *imj, bool *value, bool default_) {
+    bool success = true;
+    switch (imj->io_mode) {
+    case IMJ_READ: {
+        success = __imjr_valb(imj, value, default_);
+        break;
+    }
+
+    case IMJ_WRITE: {
+        __imjw_valb(imj, value, default_);
+        break;
+    }
+    }
+
+    if (imj->lvl_or_null == NULL) {
+        imj->done = true;
+    }
+
+    return success;
+}
+
+bool __imjr_vali(imj_t *imj, int *value, int default_) {
     if (imj->had_error) {
         *value = default_;
-        return;
+        return false;
     }
 
     __imj_assert(!imj->done, "already finished processing");
-    __imj_assert(imj->lvl == NULL || imj->lvl->type == IMJ_KEY_VALUE || imj->lvl->type == IMJ_ARRAY, "cannot put values directly inside objects");
+    __imj_assert(imj->lvl_or_null == NULL || imj->lvl_or_null->type == IMJ_KEY_VALUE || imj->lvl_or_null->type == IMJ_ARRAY, "cannot put values directly inside objects");
 
 
-    if (__imj_use_default_value_and_pop_lvl_if_possible(imj)) {
+    if (__imjr_use_default_value_and_pop_lvl_if_possible(imj)) {
         *value = default_;
-        return;
+        return false;
     }
 
     imj_val_t val;
-    bool success = __imj_read_val(imj, &val);
+    bool success = __imjr_read_val(imj, &val);
     if (success && val.kind == IMJ_NUMBER) {
         *value = (int)val.i;
     } else {
         *value = default_;
     }
 
-    __imj_update_array_if_necessary(imj);
+    __imjr_update_array_if_necessary(imj);
 
-    if (imj->lvl == NULL) {
-        imj->done = true;
-    }
+    return success && val.kind == IMJ_NUMBER;
 }
 
-void imj_vals(imj_t *imj, size_t *value, size_t default_) {
+static void __imjw_vali(imj_t *imj, int *value, int default_) {
+    __imj_assert(!imj->done, "already finished processing");
+    __imj_assert(imj->lvl_or_null == NULL || imj->lvl_or_null->type == IMJ_KEY_VALUE || imj->lvl_or_null->type == IMJ_ARRAY, "cannot put values directly inside objects");
+
+    __imjw_add_comma_and_ws_if_necessary(imj);
+
+    int val = value ? *value : default_;
+    char buffer[12];
+    int len = sprintf(buffer, "%d", val);
+    __imjw_sb_add_str(&imj->sb, buffer, len, &imj->arena);
+
+    __imjw_pop_necessary_lvls_after_val(imj);
+}
+
+bool imj_vali(imj_t *imj, int *value, int default_) {
+    bool success = false;
+
+    switch (imj->io_mode) {
+    case IMJ_READ: {
+        success = __imjr_vali(imj, value, default_);
+        break;
+    }
+
+    case IMJ_WRITE: {
+        __imjw_vali(imj, value, default_);
+        break;
+    }
+    }
+
+    if (imj->lvl_or_null == NULL) {
+        imj->done = true;
+    }
+
+    return success;
+}
+
+bool __imjr_vals(imj_t *imj, size_t *value, size_t default_) {
     if (imj->had_error) {
         *value = default_;
-        return;
+        return false;
     }
 
     __imj_assert(!imj->done, "already finished processing");
-    __imj_assert(imj->lvl == NULL || imj->lvl->type == IMJ_KEY_VALUE || imj->lvl->type == IMJ_ARRAY, "cannot put values directly inside objects");
+    __imj_assert(imj->lvl_or_null == NULL || imj->lvl_or_null->type == IMJ_KEY_VALUE || imj->lvl_or_null->type == IMJ_ARRAY, "cannot put values directly inside objects");
 
 
-    if (__imj_use_default_value_and_pop_lvl_if_possible(imj)) {
+    if (__imjr_use_default_value_and_pop_lvl_if_possible(imj)) {
         *value = default_;
-        return;
+        return false;
     }
 
     imj_val_t val;
-    bool success = __imj_read_val(imj, &val);
+    bool success = __imjr_read_val(imj, &val);
     if (success && val.kind == IMJ_NUMBER) {
         *value = (size_t)val.s;
     } else {
         *value = (size_t)default_;
     }
 
-    __imj_update_array_if_necessary(imj);
+    __imjr_update_array_if_necessary(imj);
 
-    if (imj->lvl == NULL) {
-        imj->done = true;
-    }
+    return success && val.kind == IMJ_NUMBER;
 }
 
-void imj_valf(imj_t *imj, float *value, float default_) {
+static void __imjw_vals(imj_t *imj, size_t *value, size_t default_) {
+    __imj_assert(!imj->done, "already finished processing");
+    __imj_assert(imj->lvl_or_null == NULL || imj->lvl_or_null->type == IMJ_KEY_VALUE || imj->lvl_or_null->type == IMJ_ARRAY, "cannot put values directly inside objects");
+
+    __imjw_add_comma_and_ws_if_necessary(imj);
+
+    size_t val = value ? *value : default_;
+    char buffer[32];
+    int len = sprintf(buffer, "%zu", val);
+    __imjw_sb_add_str(&imj->sb, buffer, len, &imj->arena);
+
+    __imjw_pop_necessary_lvls_after_val(imj);
+}
+
+bool imj_vals(imj_t *imj, size_t *value, size_t default_) {
+    bool success = true;
+    switch(imj->io_mode) {
+    case IMJ_READ: {
+        success = __imjr_vals(imj, value, default_);
+        break;
+    }
+
+    case IMJ_WRITE: {
+        __imjw_vals(imj, value, default_);
+        break;
+    }
+    }
+
+    if (imj->lvl_or_null == NULL) {
+        imj->done = true;
+    }
+
+    return success;
+}
+
+bool __imjr_valf(imj_t *imj, float *value, float default_) {
     if (imj->had_error) {
         *value = default_;
-        return;
+        return false;
     }
 
     __imj_assert(!imj->done, "already finished processing");
-    __imj_assert(imj->lvl == NULL || imj->lvl->type == IMJ_KEY_VALUE || imj->lvl->type == IMJ_ARRAY, "cannot put values directly inside objects");
+    __imj_assert(imj->lvl_or_null == NULL || imj->lvl_or_null->type == IMJ_KEY_VALUE || imj->lvl_or_null->type == IMJ_ARRAY, "cannot put values directly inside objects");
 
 
-    if (__imj_use_default_value_and_pop_lvl_if_possible(imj)) {
+    if (__imjr_use_default_value_and_pop_lvl_if_possible(imj)) {
         *value = default_;
-        return;
+        return false;
     }
 
     imj_val_t val;
-    bool success = __imj_read_val(imj, &val);
+    bool success = __imjr_read_val(imj, &val);
     if (success && val.kind == IMJ_NUMBER) {
         *value = (float)val.d;
     } else {
         *value = (float)default_;
     }
 
-    __imj_update_array_if_necessary(imj);
+    __imjr_update_array_if_necessary(imj);
 
-    if (imj->lvl == NULL) {
-        imj->done = true;
-    }
+    return success && val.kind == IMJ_NUMBER;
 }
 
-void imj_vald(imj_t *imj, double *value, double default_) {
+static void __imjw_valf(imj_t *imj, float *value, float default_) {
+    __imj_assert(!imj->done, "already finished processing");
+    __imj_assert(imj->lvl_or_null == NULL || imj->lvl_or_null->type == IMJ_KEY_VALUE || imj->lvl_or_null->type == IMJ_ARRAY, "cannot put values directly inside objects");
+
+    __imjw_add_comma_and_ws_if_necessary(imj);
+
+	float val = value ? *value : default_;
+	char buffer[32];
+	int len = sprintf(buffer, "%g", val);
+    __imjw_sb_add_str(&imj->sb, buffer, len, &imj->arena);
+
+    __imjw_pop_necessary_lvls_after_val(imj);
+}
+
+bool imj_valf(imj_t *imj, float *value, float default_) {
+    bool success = true;
+    switch(imj->io_mode) {
+    case IMJ_READ: {
+        success = __imjr_valf(imj, value, default_);
+        break;
+    }
+
+    case IMJ_WRITE: {
+        __imjw_valf(imj, value, default_);
+        break;
+    }
+    }
+
+    if (imj->lvl_or_null == NULL) {
+        imj->done = true;
+    }
+
+    return success;
+}
+
+bool __imjr_vald(imj_t *imj, double *value, double default_) {
     if (imj->had_error) {
         *value = default_;
-        return;
+        return false;
     }
 
     __imj_assert(!imj->done, "already finished processing");
-    __imj_assert(imj->lvl == NULL || imj->lvl->type == IMJ_KEY_VALUE || imj->lvl->type == IMJ_ARRAY, "cannot put values directly inside objects");
+    __imj_assert(imj->lvl_or_null == NULL || imj->lvl_or_null->type == IMJ_KEY_VALUE || imj->lvl_or_null->type == IMJ_ARRAY, "cannot put values directly inside objects");
 
-    if (__imj_use_default_value_and_pop_lvl_if_possible(imj)) {
+    if (__imjr_use_default_value_and_pop_lvl_if_possible(imj)) {
         *value = default_;
-        return;
+        return false;
     }
 
     imj_val_t val;
-    bool success = __imj_read_val(imj, &val);
-    if (success) {
+    bool success = __imjr_read_val(imj, &val);
+    if (success && val.kind == IMJ_NUMBER) {
         *value = val.d;
     } else {
         *value = default_;
     }
 
-    __imj_update_array_if_necessary(imj);
+    __imjr_update_array_if_necessary(imj);
 
-    if (imj->lvl == NULL) {
-        imj->done = true;
-    }
+    return success && val.kind == IMJ_NUMBER;
 }
 
-void imj_valsv(imj_t *imj, imj_sv_t *value, const char *default_) {
+static void __imjw_vald(imj_t *imj, double *value, double default_) {
+    __imj_assert(!imj->done, "already finished processing");
+    __imj_assert(imj->lvl_or_null == NULL || imj->lvl_or_null->type == IMJ_KEY_VALUE || imj->lvl_or_null->type == IMJ_ARRAY, "cannot put values directly inside objects");
+
+    __imjw_add_comma_and_ws_if_necessary(imj);
+
+	double val = value ? *value : default_;
+    char buffer[32];
+    int len = sprintf(buffer, "%g", val);
+    __imjw_sb_add_str(&imj->sb, buffer, len, &imj->arena);
+
+    __imjw_pop_necessary_lvls_after_val(imj);
+}
+
+bool imj_vald(imj_t *imj, double *value, double default_) {
+    bool success = true;
+    switch(imj->io_mode) {
+    case IMJ_READ: {
+        success = __imjr_vald(imj, value, default_);
+        break;
+    }
+
+    case IMJ_WRITE: {
+        __imjw_vald(imj, value, default_);
+        break;
+    }
+    }
+
+    if (imj->lvl_or_null == NULL) {
+        imj->done = true;
+    }
+
+    return success;
+}
+
+static bool __imj_validate_str(const char *value) {
+    (void)value;
+    // todo
+    return true;
+}
+
+bool __imjr_valsv(imj_t *imj, imj_sv_t *value, const char *default_) {
     if (imj->had_error) {
         *value = imj_cstr2sv(default_);
-        return;
+        return false;
     }
 
     __imj_assert(!imj->done, "already finished processing");
-    __imj_assert(imj->lvl == NULL || imj->lvl->type == IMJ_KEY_VALUE || imj->lvl->type == IMJ_ARRAY, "cannot put values directly inside objects");
+    __imj_assert(imj->lvl_or_null == NULL || imj->lvl_or_null->type == IMJ_KEY_VALUE || imj->lvl_or_null->type == IMJ_ARRAY, "cannot put values directly inside objects");
 
-    if (__imj_use_default_value_and_pop_lvl_if_possible(imj)) {
+    if (__imjr_use_default_value_and_pop_lvl_if_possible(imj)) {
         *value = imj_cstr2sv(default_);
-        return;
+        return false;
     }
 
     imj_val_t val;
-    bool success = __imj_read_val(imj, &val);
+    bool success = __imjr_read_val(imj, &val);
     if (success && val.kind == IMJ_STRING) {
         *value = val.sv;
     } else {
         *value = imj_cstr2sv(default_);
     }
 
-    __imj_update_array_if_necessary(imj);
+    __imjr_update_array_if_necessary(imj);
 
-    if (imj->lvl == NULL) {
-        imj->done = true;
-    }
+    return success && val.kind == IMJ_STRING;
 }
 
-void imj_valcstr(imj_t *imj, const char **value, const char *default_, imj_alloc alloc, void *allocator) {
+void __imjw_valsv(imj_t *imj, imj_sv_t *value, const char *default_) {
+    __imj_assert(!imj->done, "already finished processing");
+    __imj_assert(imj->lvl_or_null == NULL || imj->lvl_or_null->type == IMJ_KEY_VALUE || imj->lvl_or_null->type == IMJ_ARRAY, "cannot put values directly inside objects");
+
+    __imjw_add_comma_and_ws_if_necessary(imj);
+
+    const char *val = value ? value->data : default_;
+    __imj_assert(__imj_validate_str(val), "invalid json string value");
+    __imjw_sb_add_str_as_jsonstr(&imj->sb, val, value->length, &imj->arena);
+
+    __imjw_pop_necessary_lvls_after_val(imj);
+}
+
+bool imj_valsv(imj_t *imj, imj_sv_t *value, const char *default_) {
+    bool success = true;
+    switch (imj->io_mode) {
+    case IMJ_READ: {
+        success = __imjr_valsv(imj, value, default_);
+        break;
+    }
+
+    case IMJ_WRITE: {
+        __imjw_valsv(imj, value, default_);
+        break;
+    }
+    }
+
+    if (imj->lvl_or_null == NULL) {
+        imj->done = true;
+    }
+
+    return success;
+}
+
+bool __imjr_valcstr(imj_t *imj, const char **value, const char *default_, imj_alloc alloc, void *allocator) {
     imj_sv_t sv;
-    imj_valsv(imj, &sv, default_);
+    bool success = imj_valsv(imj, &sv, default_);
 
     char *new_val = alloc(allocator, sv.length+1);
     memcpy(new_val, sv.data, sv.length);
     new_val[sv.length] = '\0';
 
     *value = new_val;
+
+    return success;
+}
+
+static void __imjw_valcstr(imj_t *imj, const char **value, const char *default_) {
+    __imj_assert(!imj->done, "already finished processing");
+    __imj_assert(imj->lvl_or_null == NULL || imj->lvl_or_null->type == IMJ_KEY_VALUE || imj->lvl_or_null->type == IMJ_ARRAY, "cannot put values directly inside objects");
+
+    __imjw_add_comma_and_ws_if_necessary(imj);
+
+    const char *val = value ? *value : default_;
+    __imj_assert(__imj_validate_str(val), "invalid json string value");
+    __imjw_sb_add_str_as_jsonstr(&imj->sb, val, strlen(val), &imj->arena);
+
+    __imjw_pop_necessary_lvls_after_val(imj);
+}
+
+
+bool imj_valcstr(imj_t *imj, const char **value, const char *default_, imj_alloc alloc, void *allocator) {
+    bool success = true;
+    switch (imj->io_mode) {
+    case IMJ_READ: {
+        success = __imjr_valcstr(imj, value, default_, alloc, allocator);
+        break;
+    }
+
+    case IMJ_WRITE: {
+        __imjw_valcstr(imj, value, default_);
+        break;
+    }
+    }
+    
+    return success;
 }
 
 #endif

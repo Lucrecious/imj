@@ -58,7 +58,7 @@ static player_t player_default(void) {
 
 void player_io(player_t *player, const char *filepath, imj_io_mode_t io_mode) {
     imj_t imj = {0};
-    bool success = imj_from_file(filepath, &imj, io_mode);
+    bool success = imj_file(filepath, &imj, io_mode);
     if (!success) abort();
 
     imj_begin_obj(&imj);

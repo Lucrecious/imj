@@ -123,7 +123,7 @@ And then simply run `nob`
 ```
 
 ## Future
-- support for utf-8
+- support for unicode code points
 - skipping arbitrary number of array values
 - options for nonstandard JSON
   - allow for comments

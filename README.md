@@ -125,6 +125,7 @@ And then simply run `nob`
 ## Future
 - support for unicode code points
 - skipping arbitrary number of array values
+- simple interface to allow iterating through keys without knowing their names
 - options for nonstandard JSON
   - allow for comments
   - allow trailing commas

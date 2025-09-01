@@ -61,6 +61,10 @@ void player_io(player_t *player, const char *filepath, imj_io_mode_t io_mode) {
     bool success = imj_file(filepath, &imj, io_mode);
     if (!success) abort();
 
+    if (io_mode == IMJ_WRITE) {
+        imj.render_style = IMJ_STYLE_PRETTY;
+    }
+
     imj_begin_obj(&imj);
         imj_key(&imj, "level");
         imj_vali(&imj, &player->level, 0);
@@ -93,6 +97,11 @@ void player_io(player_t *player, const char *filepath, imj_io_mode_t io_mode) {
         imj_end_arr(&imj);
 
     imj_end_obj(&imj);
+
+    if (imj.io_mode == IMJ_WRITE) {
+        imjw_flush(&imj);
+        printf("%.*s\n", (int)imj.sb.count, imj.sb.items);
+    }
 }
 
 int main() {
@@ -102,6 +111,8 @@ int main() {
     player_io(&player, "example.json", IMJ_READ);
     
     player.health -= 5;
+    player.level = 42;
+    player.weapons[0].acquired = false;
 
-    player_io(&player, "example.json", IMJ_WRITE);
+    player_io(&player, "gen_example.json", IMJ_WRITE);
 }

@@ -87,6 +87,7 @@ struct imj_sb_t {
 typedef enum imj_render_style_t imj_render_style_t;
 enum imj_render_style_t {
     IMJ_STYLE_MIN = 0,
+    IMJ_STYLE_SINGLE_LINE,
     IMJ_STYLE_PRETTY,
 };
 
@@ -108,6 +109,8 @@ struct imj_t {
     // writing
     imj_sb_t sb;
     imj_render_style_t render_style;
+    size_t indent_lvl;
+    size_t indent_size;
 };
 
 typedef void*(*imj_alloc)(void *allocator, size_t size_bytes);
@@ -116,14 +119,16 @@ imj_sv_t imj_cstr2sv(const char *cstr);
 bool imj_sv_cstr_eq(imj_sv_t sv, const char *cstr);
 
 bool imj_file(const char *filepath, imj_t *imj, imj_io_mode_t mode);
+bool imjw_flush(imj_t *imj);
+
 void imj_free(imj_t *lson);
 
 bool imj_key(imj_t *imj, const char *key);
 
-void imj_begin_obj(imj_t *imj);
+bool imj_begin_obj(imj_t *imj);
 void imj_end_obj(imj_t *imj);
-void imj_begin_arr_ex(imj_t *imj, size_t *count);
-void imj_begin_arr(imj_t *imj);
+bool imj_begin_arr_ex(imj_t *imj, size_t *count);
+bool imj_begin_arr(imj_t *imj);
 void imj_end_arr(imj_t *imj);
 
 bool imj_valnull(imj_t *imj);
@@ -259,10 +264,33 @@ bool imj_file(const char *filepath, imj_t *imj, imj_io_mode_t mode) {
     case IMJ_WRITE: {
         imj->filepath = filepath;
         imj->io_mode = mode;
+        imj->indent_size = 2;
         break;
     }
     }
     return true;
+}
+
+bool imjw_flush(imj_t *imj) {
+    __imj_assert(imj->filepath[0] != '\0', "cannot flush without a filepath");
+
+    switch (imj->io_mode) {
+    case IMJ_READ: __imj_assert(false, "cannot flush in read mode"); return false;
+    case IMJ_WRITE: {
+        __imj_assert(imj->done, "must be finished to flush");
+
+        FILE *file = fopen(imj->filepath, "w");
+        
+        if (!file) {
+            printf("cannot open file %s\n", imj->filepath);
+            return false;
+        }
+
+        fwrite(imj->sb.items, 1, imj->sb.count, file);
+        fclose(file);
+        return true;
+    }
+    }
 }
 
 void imj_free(imj_t *lson) {
@@ -550,6 +578,7 @@ static void __imj_dive_into_arr(imj_t *imj, bool use_left_off) {
     arr->prev = imj->lvl_or_null;
     arr->left_off_or_null = use_left_off ? imj->current : NULL;
     imj->lvl_or_null = arr;
+    ++imj->indent_lvl;
 }
 
 static void __imjr_update_array_if_necessary(imj_t *imj) {
@@ -566,8 +595,14 @@ static void __imjr_update_array_if_necessary(imj_t *imj) {
     }
 }
 
-void imj_begin_arr(imj_t *imj) {
-    if (imj->had_error) return;
+static void __imjw_update_aggregate_count_if_necessary(imj_t *imj) {
+    if (imj->lvl_or_null && (imj->lvl_or_null->type == IMJ_ARRAY || imj->lvl_or_null->type == IMJ_OBJECT)) {
+        ++imj->lvl_or_null->count;
+    }
+}
+
+bool __imjr_begin_arr(imj_t *imj) {
+    if (imj->had_error) return false;
 
     __imj_assert(!imj->done, "already finished processing");
     __imj_assert(!imj->lvl_or_null || imj->lvl_or_null->type == IMJ_KEY_VALUE || imj->lvl_or_null->type == IMJ_ARRAY, "cannot begin array directly inside object");
@@ -585,10 +620,144 @@ void imj_begin_arr(imj_t *imj) {
     }
 
     __imj_dive_into_arr(imj, entered);
+
+    return entered;
 }
 
-void imj_begin_arr_ex(imj_t *imj, size_t *count) {
-    if (imj->had_error) return;
+static void __imjw_sb_add_str(imj_sb_t *sb, const char *s, size_t n, imj_arena_t *arena) {
+    for (size_t i = 0; i < n; ++i) __imj_da_push(sb, s[i], arena);
+}
+
+static void __imjw_sb_add_str_as_jsonstr(imj_sb_t *sb, const char *s, size_t n, imj_arena_t *arena) {
+    __imj_da_push(sb, '"', arena);
+    for (char *c = (char*)s; c < s+n; ++c) {
+        switch (*c) {
+        case '"': 
+        case '\\': 
+        case '/':
+        case '\b': {
+            __imj_da_push(sb, '\\', arena);
+            break;
+        }
+        
+        case '\f': {
+            __imj_da_push(sb, '\\', arena);
+            __imj_da_push(sb, 'f', arena);
+            break;
+        }
+
+        case '\n': {
+            __imj_da_push(sb, '\\', arena);
+            __imj_da_push(sb, 'n', arena);
+            break;
+        }
+
+        case '\r': {
+            __imj_da_push(sb, '\\', arena);
+            __imj_da_push(sb, 'n', arena);
+            break;
+        }
+
+        case '\t': {
+            __imj_da_push(sb, '\\', arena);
+            __imj_da_push(sb, 't', arena);
+            break;
+        }
+
+        default: {
+            __imj_da_push(sb, *c, arena);
+            break;
+        }
+        }
+    }
+
+    __imj_da_push(sb, '"', arena);
+}
+
+static void __imjw_sb_add_indent(imj_t *imj) {
+    for (size_t i = 0; i < imj->indent_lvl; ++i) {
+        for (size_t i = 0; i < imj->indent_size; ++i) {
+            __imj_da_push(&imj->sb, ' ', &imj->arena);
+        }
+    }
+}
+
+void __imjw_add_comma_and_ws_if_necessary(imj_t *imj) {
+    if (imj->lvl_or_null) {
+        switch (imj->lvl_or_null->type) {
+        case IMJ_KEY_VALUE: break;
+        case IMJ_ARRAY:
+        case IMJ_OBJECT: {
+            if (imj->lvl_or_null->count == 0) {
+                switch (imj->render_style) {
+                case IMJ_STYLE_MIN: break;
+                case IMJ_STYLE_SINGLE_LINE: {
+                    __imjw_sb_add_str(&imj->sb, " ", 1, &imj->arena);
+                    break;
+                }
+                case IMJ_STYLE_PRETTY: {
+                    __imjw_sb_add_str(&imj->sb, "\n", 1, &imj->arena);
+                    __imjw_sb_add_indent(imj);
+                    break;
+                }
+                }
+            } else {
+                switch (imj->render_style)  {
+                case IMJ_STYLE_MIN: {
+                    __imjw_sb_add_str(&imj->sb, ",", 1, &imj->arena);
+                    break;
+                }
+                case IMJ_STYLE_SINGLE_LINE: {
+                    __imjw_sb_add_str(&imj->sb, ", ", 2, &imj->arena);
+                    break;
+                }
+                case IMJ_STYLE_PRETTY: {
+                    __imjw_sb_add_str(&imj->sb, ",\n", 2, &imj->arena);
+                    __imjw_sb_add_indent(imj);
+                    break;
+                }
+                }
+            }
+
+            ++imj->lvl_or_null->count;
+            break;
+        }
+        default: __imj_assert(false, "invalid lvl type for writing"); break;
+        }
+    }
+}
+
+static void __imjw_begin_arr(imj_t *imj) {
+    __imj_assert(!imj->done, "already finished processing");
+    __imj_assert(imj->lvl_or_null == NULL || imj->lvl_or_null->type == IMJ_KEY_VALUE || imj->lvl_or_null->type == IMJ_ARRAY, "cannot put values directly inside objects");
+
+    __imjw_add_comma_and_ws_if_necessary(imj);
+
+    __imjw_update_aggregate_count_if_necessary(imj);
+
+    __imj_dive_into_arr(imj, false);
+
+    __imjw_sb_add_str(&imj->sb, "[", 1, &imj->arena);
+}
+
+bool imj_begin_arr(imj_t *imj) {
+    bool success = true;
+    switch (imj->io_mode) {
+    case IMJ_READ: {
+        success = __imjr_begin_arr(imj);
+        break;
+    }
+    case IMJ_WRITE: {
+        __imjw_begin_arr(imj);
+        break;
+    }
+    }
+
+    return success;
+}
+
+bool __imjr_begin_arr_ex(imj_t *imj, size_t *count) {
+    if (imj->had_error) return false;
 
     __imj_assert(!imj->done, "already finished processing");
     __imj_assert(!imj->lvl_or_null || imj->lvl_or_null->type == IMJ_KEY_VALUE || imj->lvl_or_null->type == IMJ_ARRAY, "cannot begin array directly inside object");
@@ -630,12 +799,12 @@ void imj_begin_arr_ex(imj_t *imj, size_t *count) {
 
                 if (*imj->current == ']') {
                     __imjr_parse_error(imj, "cannot use comma before closing array");
-                    return;
+                    return false;
                 }
             } else {
                 if (*imj->current != ']') {
                     __imjr_parse_error(imj, "expected ']' to close array");
-                    return;
+                    return false;
                 }
 
                 __imjr_skip_whitespace(imj);
@@ -650,9 +819,27 @@ void imj_begin_arr_ex(imj_t *imj, size_t *count) {
     }
 
     __imj_dive_into_arr(imj, entered);
+
+    return entered;
 }
 
-void imj_end_arr(imj_t *imj) {
+bool imj_begin_arr_ex(imj_t *imj, size_t *count) {
+    bool success = true;
+    switch (imj->io_mode) {
+    case IMJ_READ: {
+        success = __imjr_begin_arr_ex(imj, count);
+        break;
+    }
+    case IMJ_WRITE: {
+        __imjw_begin_arr(imj);
+        break;
+    }
+    }
+
+    return success;
+}
+
+void __imjr_end_arr(imj_t *imj) {
     if (imj->had_error) return;
 
     __imj_assert(!imj->done, "already finished processing");
@@ -664,6 +851,7 @@ void imj_end_arr(imj_t *imj) {
     }
 
     __imj_pop_lvl(imj);
+    --imj->indent_lvl;
 
     if (imj->lvl_or_null) {
         if (imj->lvl_or_null->type == IMJ_KEY_VALUE) {
@@ -672,31 +860,100 @@ void imj_end_arr(imj_t *imj) {
 
         __imjr_update_array_if_necessary(imj);
     }
+}
+
+static void __imjw_pop_necessary_lvls_after_val(imj_t *imj) {
+    if (imj->lvl_or_null) {
+        switch (imj->lvl_or_null->type) {
+        case IMJ_ARRAY: break;
+        case IMJ_KEY_VALUE: {
+            __imj_pop_lvl(imj);
+            break;
+        }
+        case IMJ_OBJECT: {
+            __imj_assert(false, "invalid level");
+            break;
+        }
+
+        default: __imj_assert(false, "invalid enum as level"); break;
+        }
+    }
+}
+
+void __imjw_end_arr(imj_t *imj) {
+    __imj_assert(!imj->done, "already finished processing");
+    __imj_assert(imj->lvl_or_null && imj->lvl_or_null->type == IMJ_ARRAY, "must be inside array to exit");
+
+    size_t item_count = imj->lvl_or_null->count;
+
+    __imj_pop_lvl(imj);
+    --imj->indent_lvl;
+
+    __imjw_pop_necessary_lvls_after_val(imj);
+
+    if (item_count > 0) {
+        switch (imj->render_style) {
+        case IMJ_STYLE_MIN: break;
+        case IMJ_STYLE_SINGLE_LINE: {
+            __imjw_sb_add_str(&imj->sb, " ", 1, &imj->arena);
+            break;
+        }
+        case IMJ_STYLE_PRETTY: {
+            __imjw_sb_add_str(&imj->sb, "\n", 1, &imj->arena);
+            __imjw_sb_add_indent(imj);
+            break;
+        }
+        }
+    }
+
+    
+    __imjw_sb_add_str(&imj->sb, "]", 1, &imj->arena);
+}
+
+void imj_end_arr(imj_t *imj) {
+    switch (imj->io_mode) {
+    case IMJ_READ: {
+        __imjr_end_arr(imj);
+        break;
+    }
+    case IMJ_WRITE: {
+        __imjw_end_arr(imj);
+        break;
+    }
+    }
 
     if (imj->lvl_or_null == NULL) {
         imj->done = true;
     }
 }
 
-void imj_begin_obj(imj_t *imj) {
-    if (imj->had_error) {
-        return;
-    }
-
-    __imj_assert(!imj->done, "already finished processing");
-    __imj_assert(!imj->lvl_or_null || imj->lvl_or_null->type == IMJ_KEY_VALUE || imj->lvl_or_null->type == IMJ_ARRAY, "cannot start object directly inside object");
-
+static imj_lvl_t *__imj_dive_into_obj(imj_t *imj) {
     imj_lvl_t *obj = __imj_arena_alloc(&imj->arena, sizeof(imj_lvl_t));
     *obj = (imj_lvl_t){0};
     obj->type = IMJ_OBJECT;
     obj->prev = imj->lvl_or_null;
     imj->lvl_or_null = obj;
 
+    ++imj->indent_lvl;
+
+    return obj;
+}
+
+bool __imjr_begin_obj(imj_t *imj) {
+    if (imj->had_error) {
+        return false;
+    }
+
+    __imj_assert(!imj->done, "already finished processing");
+    __imj_assert(!imj->lvl_or_null || imj->lvl_or_null->type == IMJ_KEY_VALUE || imj->lvl_or_null->type == IMJ_ARRAY, "cannot start object directly inside object");
+
+    imj_lvl_t *obj = __imj_dive_into_obj(imj);
+
     bool incorrect_pending_value = imj->value_pending && *imj->current != '{';
     bool is_at_root = imj->lvl_or_null->prev == NULL;
     if (incorrect_pending_value || (!is_at_root && !imj->value_pending)) {
         obj->left_off_or_null = NULL;
-        return;
+        return false;
     }
 
     __imjr_skip_whitespace(imj);
@@ -709,9 +966,40 @@ void imj_begin_obj(imj_t *imj) {
     __imjr_skip_whitespace(imj);
 
     obj->left_off_or_null = imj->current;
+
+    return true;
 }
 
-void imj_end_obj(imj_t *imj) {
+void __imjw_begin_obj(imj_t *imj) {
+    __imj_assert(!imj->done, "already finished processing");
+    __imj_assert(imj->lvl_or_null == NULL || imj->lvl_or_null->type == IMJ_KEY_VALUE || imj->lvl_or_null->type == IMJ_ARRAY, "cannot put values directly inside objects");
+
+    __imjw_add_comma_and_ws_if_necessary(imj);
+
+    __imjw_update_aggregate_count_if_necessary(imj);
+
+    __imj_dive_into_obj(imj);
+
+    __imjw_sb_add_str(&imj->sb, "{", 1, &imj->arena);
+}
+
+bool imj_begin_obj(imj_t *imj) {
+    bool success = true;
+    switch (imj->io_mode) {
+    case IMJ_READ: {
+        success = __imjr_begin_obj(imj);
+        break;
+    }
+    case IMJ_WRITE: {
+        __imjw_begin_obj(imj);
+        break;
+    }
+    }
+
+    return success;
+}
+
+void __imjr_end_obj(imj_t *imj) {
     if (imj->had_error) return;
 
     __imj_assert(!imj->done, "already finished processing");
@@ -731,6 +1019,47 @@ void imj_end_obj(imj_t *imj) {
 
         __imjr_update_array_if_necessary(imj);
     }
+}
+
+void __imjw_end_obj(imj_t *imj) {
+    __imj_assert(!imj->done, "already finished processing");
+    __imj_assert(imj->lvl_or_null->type == IMJ_OBJECT, "must be inside array to exit");
+
+    size_t key_value_count = imj->lvl_or_null->count;
+    __imj_pop_lvl(imj);
+    --imj->indent_lvl;
+
+    __imjw_pop_necessary_lvls_after_val(imj);
+
+    if (key_value_count > 0) {
+        switch (imj->render_style) {
+        case IMJ_STYLE_MIN: break;
+        case IMJ_STYLE_SINGLE_LINE: {
+            __imjw_sb_add_str(&imj->sb, " ", 1, &imj->arena);
+            break;
+        }
+        case IMJ_STYLE_PRETTY: {
+            __imjw_sb_add_str(&imj->sb, "\n", 1, &imj->arena);
+            __imjw_sb_add_indent(imj);
+            break;
+        }
+        }
+    }
+
+    __imjw_sb_add_str(&imj->sb, "}", 1, &imj->arena);
+}
+
+void imj_end_obj(imj_t *imj) {
+    switch (imj->io_mode) {
+    case IMJ_READ: {
+        __imjr_end_obj(imj);
+        break;
+    }
+    case IMJ_WRITE: {
+        __imjw_end_obj(imj);
+        break;
+    }
+    }
 
     if (imj->lvl_or_null == NULL) {
         imj->done = true;
@@ -746,7 +1075,7 @@ static void __imj_dive_into_key(imj_t *imj, bool value_pending) {
     imj->value_pending = value_pending;
 }
 
-bool imj_key(imj_t *imj, const char *key) {
+bool __imjr_key(imj_t *imj, const char *key) {
 
     imj->value_pending = false;
 
@@ -832,6 +1161,45 @@ bool imj_key(imj_t *imj, const char *key) {
             return false;
         }
     }
+}
+
+void __imjw_key(imj_t *imj, const char *key) {
+    __imj_assert(!imj->done, "already finished processing");
+    __imj_assert(imj->lvl_or_null && imj->lvl_or_null->type == IMJ_OBJECT, "keys can only reside inside objects");
+
+    __imjw_add_comma_and_ws_if_necessary(imj);
+
+    __imj_dive_into_key(imj, false);
+
+    __imjw_sb_add_str_as_jsonstr(&imj->sb, key, strlen(key), &imj->arena);
+
+    __imjw_sb_add_str(&imj->sb, ":", 1, &imj->arena);
+
+    switch (imj->render_style) {
+    case IMJ_STYLE_MIN: break;
+    case IMJ_STYLE_SINGLE_LINE:
+    case IMJ_STYLE_PRETTY: {
+        __imjw_sb_add_str(&imj->sb, " ", 1, &imj->arena);
+        break;
+    }
+    }
+}
+
+bool imj_key(imj_t *imj, const char *key) {
+    bool success = true;
+    switch (imj->io_mode) {
+    case IMJ_READ: {
+        success = __imjr_key(imj, key);
+        break;
+    }
+
+    case IMJ_WRITE: {
+        __imjw_key(imj, key);
+        break;
+    }
+    }
+
+    return success;
 }
 
 static bool __imjr_is_digit(char c) {
@@ -1020,100 +1388,6 @@ static bool __imjr_use_default_value_and_pop_lvl_if_possible(imj_t *imj) {
     return !value_pending;
 }
 
-void __imjw_add_comma_and_ws_if_necessary(imj_t *imj) {
-    if (imj->lvl_or_null) {
-        switch (imj->lvl_or_null->type) {
-        case IMJ_ARRAY:
-        case IMJ_OBJECT: {
-            if (imj->lvl_or_null->count > 0) {
-                switch (imj->render_style)  {
-                case IMJ_STYLE_MIN: {
-                    __imjw_sb_add_str(&imj->sb, ",", 1, &imj->arena);
-                    break;
-                }
-                case IMJ_STYLE_PRETTY: {
-                    __imjw_sb_add_str(&imj->sb, ",\n", 2, &imj->arena);
-                    break;
-                }
-                }
-            }
-
-            ++imj->lvl_or_null->count;
-            break;
-        }
-        default: __imj_assert(false, "invalid lvl type for writing"); break;
-        }
-    }
-}
-
-static void __imjw_sb_add_str_as_jsonstr(imj_sb_t *sb, const char *s, size_t n, imj_arena_t *arena) {
-    __imj_da_push(sb, '"', arena);
-    for (char *c = (char*)s; c < s+n; ++c) {
-        switch (*c) {
-        case '"': 
-        case '\\': 
-        case '/':
-        case '\b': {
-            __imj_da_push(sb, '\\', arena);
-            break;
-        }
-        
-        case '\f': {
-            __imj_da_push(sb, '\\', arena);
-            __imj_da_push(sb, 'f', arena);
-            break;
-        }
-
-        case '\n': {
-            __imj_da_push(sb, '\\', arena);
-            __imj_da_push(sb, 'n', arena);
-            break;
-        }
-
-        case '\r': {
-            __imj_da_push(sb, '\\', arena);
-            __imj_da_push(sb, 'n', arena);
-            break;
-        }
-
-        case '\t': {
-            __imj_da_push(sb, '\\', arena);
-            __imj_da_push(sb, 't', arena);
-            break;
-        }
-
-        default: {
-            __imj_da_push(sb, *c, arena);
-            break;
-        }
-        }
-    }
-
-    __imj_da_push(sb, '"', arena);
-}
-
-static void __imjw_sb_add_str(imj_sb_t *sb, const char *s, size_t n, imj_arena_t *arena) {
-    for (size_t i = 0; i < n; ++i) __imj_da_push(sb, s[i], arena);
-}
-
-static void __imjw_pop_necessary_lvls_after_val(imj_t *imj) {
-    if (imj->lvl_or_null) {
-        switch (imj->lvl_or_null->type) {
-        case IMJ_ARRAY: break;
-        case IMJ_KEY_VALUE: {
-            __imj_pop_lvl(imj);
-            break;
-        }
-        case IMJ_OBJECT: {
-            __imj_assert(false, "invalid level");
-            break;
-        }
-
-        default: __imj_assert(false, "invalid enum as level"); break;
-        }
-    }
-}
-
 static bool __imjr_valnull(imj_t *imj) {
     if (imj->had_error) {
         return false;
@@ -1144,6 +1418,7 @@ void __imjw_valnull(imj_t *imj) {
     __imjw_sb_add_str(&imj->sb, "null", 4, &imj->arena);
 
     __imjw_pop_necessary_lvls_after_val(imj);
+    __imjw_update_aggregate_count_if_necessary(imj);
 }
 
 bool imj_valnull(imj_t *imj) {
@@ -1208,6 +1483,7 @@ void __imjw_valb(imj_t *imj, bool *value, bool default_) {
         &imj->arena);
 
     __imjw_pop_necessary_lvls_after_val(imj);
+    __imjw_update_aggregate_count_if_necessary(imj);
 }
 
 bool imj_valb(imj_t *imj, bool *value, bool default_) {
@@ -1271,6 +1547,7 @@ static void __imjw_vali(imj_t *imj, int *value, int default_) {
     __imjw_sb_add_str(&imj->sb, buffer, len, &imj->arena);
 
     __imjw_pop_necessary_lvls_after_val(imj);
+    __imjw_update_aggregate_count_if_necessary(imj);
 }
 
 bool imj_vali(imj_t *imj, int *value, int default_) {
@@ -1335,6 +1612,7 @@ static void __imjw_vals(imj_t *imj, size_t *value, size_t default_) {
     __imjw_sb_add_str(&imj->sb, buffer, len, &imj->arena);
 
     __imjw_pop_necessary_lvls_after_val(imj);
+    __imjw_update_aggregate_count_if_necessary(imj);
 }
 
 bool imj_vals(imj_t *imj, size_t *value, size_t default_) {
@@ -1398,6 +1676,7 @@ static void __imjw_valf(imj_t *imj, float *value, float default_) {
     __imjw_sb_add_str(&imj->sb, buffer, len, &imj->arena);
 
     __imjw_pop_necessary_lvls_after_val(imj);
+    __imjw_update_aggregate_count_if_necessary(imj);
 }
 
 bool imj_valf(imj_t *imj, float *value, float default_) {
@@ -1460,6 +1739,7 @@ static void __imjw_vald(imj_t *imj, double *value, double default_) {
     __imjw_sb_add_str(&imj->sb, buffer, len, &imj->arena);
 
     __imjw_pop_necessary_lvls_after_val(imj);
+    __imjw_update_aggregate_count_if_necessary(imj);
 }
 
 bool imj_vald(imj_t *imj, double *value, double default_) {
@@ -1527,6 +1807,7 @@ void __imjw_valsv(imj_t *imj, imj_sv_t *value, const char *default_) {
     __imjw_sb_add_str_as_jsonstr(&imj->sb, val, value->length, &imj->arena);
 
     __imjw_pop_necessary_lvls_after_val(imj);
+    __imjw_update_aggregate_count_if_necessary(imj);
 }
 
 bool imj_valsv(imj_t *imj, imj_sv_t *value, const char *default_) {
@@ -1574,6 +1855,7 @@ static void __imjw_valcstr(imj_t *imj, const char **value, const char *default_)
     __imjw_sb_add_str_as_jsonstr(&imj->sb, val, strlen(val), &imj->arena);
 
     __imjw_pop_necessary_lvls_after_val(imj);
+    __imjw_update_aggregate_count_if_necessary(imj);
 }
 
 

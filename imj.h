@@ -143,6 +143,13 @@ bool imj_vald(imj_t *imj, double *value, double default_);
 bool imj_valcstr(imj_t *imj, const char **value, const char *default_, imj_alloc alloc, void *allocator);
 bool imj_valrawsv(imj_t *imj, imj_sv_t *value, const char *default_);
 
+void imjw_valb(imj_t *imj, bool value);
+void imjw_vali(imj_t *imj, int value);
+void imjw_vals(imj_t *imj, size_t value);
+void imjw_valf(imj_t *imj, float value);
+void imjw_vald(imj_t *imj, double value);
+void imjw_valcstr(imj_t *imj, const char *value);
+
 #endif
 
 #ifdef IMJ_IMPLEMENTATION
@@ -1936,6 +1943,30 @@ bool imj_valcstr(imj_t *imj, const char **value, const char *default_, imj_alloc
     }
     
     return success;
+}
+
+void imjw_valb(imj_t *imj, bool value) {
+    __imjw_valb(imj, NULL, value);
+}
+
+void imjw_vali(imj_t *imj, int value) {
+    __imjw_vali(imj, NULL, value);
+}
+
+void imjw_vals(imj_t *imj, size_t value) {
+    __imjw_vals(imj, NULL, value);
+}
+
+void imjw_valf(imj_t *imj, float value) {
+    __imjw_valf(imj, NULL, value);
+}
+
+void imjw_vald(imj_t *imj, double value) {
+    __imjw_vald(imj, NULL, value);
+}
+
+void imjw_valcstr(imj_t *imj, const char *value) {
+    __imjw_valcstr(imj, NULL, value);
 }
 
 #endif

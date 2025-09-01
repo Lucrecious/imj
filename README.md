@@ -225,4 +225,4 @@ This adds a lot of "moving data" code that needs to be synced constantly as the 
 
 See [cJSON](https://github.com/DaveGamble/cJSON?tab=readme-ov-file#printing) for a real example of this in a popular JSON library.
 
-This small library aims to solve this syncing issue by using an immediate mode API rather than a retained one, allowing you to use the same  code for reading _and_ writing.
+This small library aims to solve this syncing issue by using an immediate mode API that uses an internal variable to decide between reading _and_ writing, this allows you to use the same code for both. Thus, the reading and writing code will always be in sync because it's the same code.

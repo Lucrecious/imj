@@ -5,8 +5,12 @@ Here's a sample:
 ```c
 void player_io(player_t *player, const char *filepath, imj_io_mode_t io_mode) {
     imj_t imj = {0};
-    bool success = imj_from_file(filepath, &imj, io_mode);
+    bool success = imj_file(filepath, &imj, io_mode);
     if (!success) abort();
+
+    if (io_mode == IMJ_WRITE) {
+        imj.render_style = IMJ_STYLE_PRETTY;
+    }
 
     imj_begin_obj(&imj);
         imj_key(&imj, "level");
@@ -40,6 +44,11 @@ void player_io(player_t *player, const char *filepath, imj_io_mode_t io_mode) {
         imj_end_arr(&imj);
 
     imj_end_obj(&imj);
+
+    if (imj.io_mode == IMJ_WRITE) {
+        imjw_flush(&imj);
+        printf("%.*s\n", (int)imj.sb.count, imj.sb.items);
+    }
 }
 
 int main() {
@@ -48,10 +57,50 @@ int main() {
     player_io(&player, "example.json", IMJ_READ);
     
     player.health -= 5;
+    player.level = 42;
+    player.weapons[0].acquired = false;
 
-    player_io(&player, "example.json", IMJ_WRITE);
+    player_io(&player, "gen_example.json", IMJ_WRITE);
 }
 ```
+
+Here's the output into `gen_example.json`.
+```c
+{
+  "level": 42,
+  "health": 95,
+  "weapons": [
+    {
+      "id": 0,
+      "acquired": false
+    },
+    {
+      "id": 1,
+      "acquired": true
+    },
+    {
+      "id": 2,
+      "acquired": true
+    }
+  ],
+  "inventory": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12
+  ]
+}
+```
+
 The same code (in the `player_io` function) is used for reading and writing.
 
 In read mode, the json string is parsed on the fly. Keys are looked up by skipping the elements in between, so object key values are still order agnostic.

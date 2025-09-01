@@ -1,5 +1,5 @@
-# imJSON - an immediate mode JSON reader and writer
-imJSON is a simple, small and portable immediate mode library for reading and writing JSON files.
+# imj
+imj is a simple, small and portable immediate mode library for reading and writing JSON files.
 
 Here's a sample:
 ```c
@@ -95,7 +95,7 @@ The third paramter is a default in read mode when the value is not found. In wri
 the second for serialization.
 
 ## Usage
-imJSON is a header-only library, so all you need to do is copy/paste the `imj.h` file into your source directory and define `IMJ_IMPLEMENTATION` before including `imj.h`
+imj is a header-only library, so all you need to do is copy/paste the `imj.h` file into your source directory and define `IMJ_IMPLEMENTATION` before including `imj.h`
 in one of your source files to paste the implementation. You only do this in _one_ of the source files, then include `imj.h` regularly everywhere else.
 
 In a single source file:
@@ -132,7 +132,7 @@ And then simply run `nob`
 - robustness (more tests)
 
 ## Limitations
-imJSON is made primarily for reading _and_ writing. As such, it's not very convenient for inspecting arbitrary JSON strings. For that, you are better off using
+imj is made primarily for reading _and_ writing. As such, it's not very convenient for inspecting arbitrary JSON strings. For that, you are better off using
 any of the [gazillion](https://www.json.org/json-en.html#:~:text=bmx%2Drjson-,C,-mu_json) retain mode JSON parsers out there.
 
 ## Why yet another JSON parser 

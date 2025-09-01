@@ -121,7 +121,7 @@ bool imj_rawsv_to_cstrn(imj_sv_t sv, char *buffer, size_t n);
 
 bool imj_file(const char *filepath, imj_t *imj, imj_io_mode_t mode);
 bool imjw_flush(imj_t *imj);
-void imj_cstrn(const char *cstr, size_t n, imj_io_mode_t mode, imj_t *imj);
+void imjr_cstrn(const char *cstr, size_t n, imj_io_mode_t mode, imj_t *imj);
 
 void imj_free(imj_t *lson);
 
@@ -283,7 +283,7 @@ bool imj_file(const char *filepath, imj_t *imj, imj_io_mode_t mode) {
     return true;
 }
 
-void imj_cstrn(const char *cstr, size_t n, imj_io_mode_t mode, imj_t *imj) {
+void imjr_cstrn(const char *cstr, size_t n, imj_io_mode_t mode, imj_t *imj) {
     *imj = (imj_t){0};
 
     switch (mode) {

@@ -401,6 +401,39 @@ bool array_reading_test(const char *path) {
 }
 
 int main() {
+    // basic reading string test
+    {
+        bool failed = false;
+
+        const char *src = "[1, 2, 3, 4]";
+        imj_t imj = {0};
+        imjr_cstrn(src, strlen(src), IMJ_READ, &imj);
+
+        size_t count;
+        imj_begin_arr_ex(&imj, &count);
+
+        if (count != 4)  failed = true;
+
+        int val;
+        imj_vali(&imj, &val, 0);
+        if (val != 1) failed = true;
+
+        imj_vali(&imj, &val, 0);
+        if (val != 2) failed = true;
+
+        imj_vali(&imj, &val, 0);
+        if (val != 3) failed = true;
+
+        imj_vali(&imj, &val, 0);
+        if (val != 4) failed = true;
+
+        imj_end_arr(&imj);
+
+        if (failed) {
+            printf("failed basic reading test\n");
+        }
+    }
+
     Nob_File_Paths paths = {0};
     if (!nob_read_entire_dir("test", &paths)) {
         return 1;

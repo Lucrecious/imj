@@ -117,9 +117,11 @@ typedef void*(*imj_alloc)(void *allocator, size_t size_bytes);
 
 imj_sv_t imj_cstr2sv(const char *cstr);
 bool imj_sv_cstr_eq(imj_sv_t sv, const char *cstr);
+bool imj_rawsv_to_cstrn(imj_sv_t sv, char *buffer, size_t n);
 
 bool imj_file(const char *filepath, imj_t *imj, imj_io_mode_t mode);
 bool imjw_flush(imj_t *imj);
+void imj_cstrn(const char *cstr, size_t n, imj_io_mode_t mode, imj_t *imj);
 
 void imj_free(imj_t *lson);
 
@@ -138,7 +140,7 @@ bool imj_vals(imj_t *imj, size_t *value, size_t default_);
 bool imj_valf(imj_t *imj, float *value, float default_);
 bool imj_vald(imj_t *imj, double *value, double default_);
 bool imj_valcstr(imj_t *imj, const char **value, const char *default_, imj_alloc alloc, void *allocator);
-bool imj_valsv(imj_t *imj, imj_sv_t *value, const char *default_);
+bool imj_valrawsv(imj_t *imj, imj_sv_t *value, const char *default_);
 
 #endif
 
@@ -224,6 +226,26 @@ imj_sv_t imj_cstr2sv(const char *cstr) {
 
 static void __imjr_skip_whitespace(imj_t *imj);
 
+static void __imjr_init(const char *filepath, const char *str, size_t n, imj_t *ret) {
+    ret->filepath = filepath;
+    ret->src.data = str;
+    ret->src.length = n;
+    ret->current = (char*)ret->src.data;
+    ret->log_errors = true;
+    ret->io_mode = IMJ_READ;
+
+    __imjr_skip_whitespace(ret);
+    if (*ret->current != '\0') {
+        ret->value_pending = true;
+    }
+}
+
+static void __imjw_init(const char *filepath, imj_t *ret) {
+    ret->filepath = filepath;
+    ret->io_mode = IMJ_WRITE;
+    ret->indent_size = 2;
+}
+
 bool imj_file(const char *filepath, imj_t *imj, imj_io_mode_t mode) {
     *imj = (imj_t){0};
 
@@ -246,29 +268,35 @@ bool imj_file(const char *filepath, imj_t *imj, imj_io_mode_t mode) {
         fread(buffer, 1, size, file);
         buffer[size] = '\0';
         fclose(file);
-        
-        imj->filepath = filepath;
-        imj->src.data = buffer;
-        imj->src.length = size;
-        imj->current = (char*)imj->src.data;
-        imj->log_errors = true;
-        imj->io_mode = mode;
 
-        __imjr_skip_whitespace(imj);
-        if (*imj->current != '\0') {
-            imj->value_pending = true;
-        }
+        __imjr_init(filepath, buffer, size, imj);
         break;
     }
 
     case IMJ_WRITE: {
-        imj->filepath = filepath;
-        imj->io_mode = mode;
-        imj->indent_size = 2;
+        __imjw_init(filepath, imj);
         break;
     }
     }
+
+
     return true;
+}
+
+void imj_cstrn(const char *cstr, size_t n, imj_io_mode_t mode, imj_t *imj) {
+    *imj = (imj_t){0};
+
+    switch (mode) {
+    case IMJ_READ: {
+        __imjr_init("", cstr, n, imj);
+        break;
+    }
+
+    case IMJ_WRITE: {
+        __imjw_init("", imj);
+        break;
+    }
+    }
 }
 
 bool imjw_flush(imj_t *imj) {
@@ -331,7 +359,44 @@ bool imj_sv_cstr_eq(imj_sv_t sv, const char *cstr) {
     return i == sv.length && c == '\0';
 }
 
-static char __imj_next(imj_t *imj) {
+bool imj_rawsv_to_cstrn(imj_sv_t sv, char *buffer, size_t n) {
+    size_t count = 0;
+
+    for (size_t i = 0; i < sv.length; ++i) {
+        switch (sv.data[i]) {
+        case '\\':  {
+            ++i;
+            switch (sv.data[i]) {
+            case '"': buffer[count] = '"'; break;
+            case '\\': buffer[count] = '\\'; break;
+            case '/': buffer[count] = '/'; break;
+            case 'b': buffer[count] = '\b'; break;
+            case 'f': buffer[count] = '\f'; break;
+            case 'n': buffer[count] = '\n'; break;
+            case 'r': buffer[count] = '\r'; break;
+            case 't': buffer[count] = '\t'; break;
+            case 'u': {
+                __imj_log(IMJ_LOG_ERROR, "unicode codepoints are not supported yet");
+                return false;
+            }
+            default: return false;
+            }
+            break;
+        }
+        default: {
+            buffer[count] = sv.data[i];
+            break;
+        }
+        }
+
+        ++count;
+        if (count >= n) break;
+    }
+
+    return true;
+}
+
+static char __imjr_next(imj_t *imj) {
     if (*imj->current == '\0') return '\0';
 
     char c = *imj->current;
@@ -340,7 +405,7 @@ static char __imj_next(imj_t *imj) {
 }
 
 static bool __imjr_consume(imj_t *imj, char c) {
-    char check = __imj_next(imj);
+    char check = __imjr_next(imj);
     if (check == c) {
         return true;
     }
@@ -382,7 +447,7 @@ static void __imjr_skip_whitespace(imj_t *imj) {
 
 static bool __imjr_match(imj_t *imj, char c) {
     if (*imj->current == c) {
-        __imj_next(imj);
+        __imjr_next(imj);
         return true;
     }
 
@@ -631,6 +696,11 @@ static void __imjw_sb_add_str(imj_sb_t *sb, const char *s, size_t n, imj_arena_t
 static void __imjw_sb_add_str_as_jsonstr(imj_sb_t *sb, const char *s, size_t n, imj_arena_t *arena) {
     __imj_da_push(sb, '"', arena);
     for (char *c = (char*)s; c < s+n; ++c) {
+        if ((unsigned char)*c > 127) {
+            __imj_assert(false, "unicode is not supported yet");
+            return;
+        }
+
         switch (*c) {
         case '"': 
         case '\\': 
@@ -661,6 +731,11 @@ static void __imjw_sb_add_str_as_jsonstr(imj_sb_t *sb, const char *s, size_t n, 
         case '\t': {
             __imj_da_push(sb, '\\', arena);
             __imj_da_push(sb, 't', arena);
+            break;
+        }
+
+        case '\v': case '\a': {
+            __imj_assert(false, "unsupported escape sequences");
             break;
         }
 
@@ -1763,13 +1838,7 @@ bool imj_vald(imj_t *imj, double *value, double default_) {
     return success;
 }
 
-static bool __imj_validate_str(const char *value) {
-    (void)value;
-    // todo
-    return true;
-}
-
-bool __imjr_valsv(imj_t *imj, imj_sv_t *value, const char *default_) {
+bool __imjr_valrawsv(imj_t *imj, imj_sv_t *value, const char *default_) {
     if (imj->had_error) {
         *value = imj_cstr2sv(default_);
         return false;
@@ -1796,30 +1865,29 @@ bool __imjr_valsv(imj_t *imj, imj_sv_t *value, const char *default_) {
     return success && val.kind == IMJ_STRING;
 }
 
-void __imjw_valsv(imj_t *imj, imj_sv_t *value, const char *default_) {
+void __imjw_valrawsv(imj_t *imj, imj_sv_t *value, const char *default_) {
     __imj_assert(!imj->done, "already finished processing");
     __imj_assert(imj->lvl_or_null == NULL || imj->lvl_or_null->type == IMJ_KEY_VALUE || imj->lvl_or_null->type == IMJ_ARRAY, "cannot put values directly inside objects");
 
     __imjw_add_comma_and_ws_if_necessary(imj);
 
     const char *val = value ? value->data : default_;
-    __imj_assert(__imj_validate_str(val), "invalid json string value");
     __imjw_sb_add_str_as_jsonstr(&imj->sb, val, value->length, &imj->arena);
 
     __imjw_pop_necessary_lvls_after_val(imj);
     __imjw_update_aggregate_count_if_necessary(imj);
 }
 
-bool imj_valsv(imj_t *imj, imj_sv_t *value, const char *default_) {
+bool imj_valrawsv(imj_t *imj, imj_sv_t *value, const char *default_) {
     bool success = true;
     switch (imj->io_mode) {
     case IMJ_READ: {
-        success = __imjr_valsv(imj, value, default_);
+        success = __imjr_valrawsv(imj, value, default_);
         break;
     }
 
     case IMJ_WRITE: {
-        __imjw_valsv(imj, value, default_);
+        __imjw_valrawsv(imj, value, default_);
         break;
     }
     }
@@ -1833,10 +1901,10 @@ bool imj_valsv(imj_t *imj, imj_sv_t *value, const char *default_) {
 
 bool __imjr_valcstr(imj_t *imj, const char **value, const char *default_, imj_alloc alloc, void *allocator) {
     imj_sv_t sv;
-    bool success = imj_valsv(imj, &sv, default_);
+    bool success = imj_valrawsv(imj, &sv, default_);
 
     char *new_val = alloc(allocator, sv.length+1);
-    memcpy(new_val, sv.data, sv.length);
+    imj_rawsv_to_cstrn(sv, new_val, sv.length);
     new_val[sv.length] = '\0';
 
     *value = new_val;
@@ -1851,7 +1919,6 @@ static void __imjw_valcstr(imj_t *imj, const char **value, const char *default_)
     __imjw_add_comma_and_ws_if_necessary(imj);
 
     const char *val = value ? *value : default_;
-    __imj_assert(__imj_validate_str(val), "invalid json string value");
     __imjw_sb_add_str_as_jsonstr(&imj->sb, val, strlen(val), &imj->arena);
 
     __imjw_pop_necessary_lvls_after_val(imj);

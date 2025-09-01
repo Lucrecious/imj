@@ -245,7 +245,7 @@ bool object_reading_test(const char *path) {
                     imj_begin_obj(imj);
                         imj_key(imj, "key");
                         imj_sv_t sv;
-                        imj_valsv(imj, &sv, "");
+                        imj_valrawsv(imj, &sv, "");
                         if (!imj_sv_cstr_eq(sv, "value")) {
                             failed =true;
                             break;

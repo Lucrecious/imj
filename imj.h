@@ -338,7 +338,6 @@ bool imjw_flush(imj_t *imj) {
 
 void imj_free(imj_t *lson) {
     __imj_arena_free(&lson->arena);
-    free(lson);
 }
 
 enum imj_log_lvl_t {

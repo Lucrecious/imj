@@ -716,11 +716,24 @@ static void __imjw_sb_add_str_as_jsonstr(imj_sb_t *sb, const char *s, size_t n, 
         }
 
         switch (*c) {
-        case '"': 
-        case '\\': 
-        case '/':
+        case '"': { 
+            __imj_da_push(sb, '\\', arena);
+            __imj_da_push(sb, '"', arena);
+            break;
+        }
+        case '\\': {
+            __imj_da_push(sb, '\\', arena);
+            __imj_da_push(sb, '\\', arena);
+            break;
+        }
+        case '/': {
+            __imj_da_push(sb, '\\', arena);
+            __imj_da_push(sb, '/', arena);
+            break;
+        }
         case '\b': {
             __imj_da_push(sb, '\\', arena);
+            __imj_da_push(sb, 'b', arena);
             break;
         }
         
